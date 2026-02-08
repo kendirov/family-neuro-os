@@ -6,11 +6,12 @@ import {
   Package,
   UtensilsCrossed,
   X,
+  Trash2,
 } from 'lucide-react'
 import { KioskLayout } from '@/components/Layout/KioskLayout'
 import { Header } from '@/components/Header'
 import { Toast } from '@/components/Toast'
-import { BlueRacerHelmet, PurplePilotHelmet } from '@/components/HelmetAvatar'
+import { BlueRacerHelmet, PurplePilotHelmet, PilotAvatar } from '@/components/HelmetAvatar'
 import { useAppStore } from '@/stores/useAppStore'
 import { MARKET_ITEMS } from '@/data/marketItems'
 import { getMissionTasksByCategory, PENALTY_BOX } from '@/data/taskConfig'
@@ -20,10 +21,13 @@ import { ControlCenter } from '@/components/ControlCenter'
 import { CountUpNumber } from '@/components/CountUpNumber'
 import { SupplyDepotSchedule } from '@/components/SupplyDepotSchedule'
 import { TransactionModal } from '@/components/TransactionModal'
-import { WeekProgressBar } from '@/components/WeekProgressBar'
+import { SchoolSchedule } from '@/components/SchoolSchedule'
+import { WallSchedule } from '@/components/WallSchedule'
 import { TodayStats } from '@/components/TodayStats'
 import { motion } from 'framer-motion'
-import { Wallet } from 'lucide-react'
+import { Wallet, Coins } from 'lucide-react'
+import { WheelOfFortune } from '@/components/WheelOfFortune'
+import { RaidBoss } from '@/components/RaidBoss'
 
 /** Mission tasks from centralized task config (4 phases: Утро, Школа, Питание, Дом и сон). */
 const MISSION_TASKS_BY_CATEGORY = getMissionTasksByCategory()
@@ -158,9 +162,25 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
   const [floatFromCard, setFloatFromCard] = useState(null) // { x, y, amount } flying toward score
   const [flashId, setFlashId] = useState(null)
   const [showTransactionModal, setShowTransactionModal] = useState(false)
-  const Helmet = theme.Helmet
 
-  const personalLog = (transactions ?? []).filter((t) => t.userId === user.id).slice(0, 5)
+  const personalLog = (transactions ?? []).filter((t) => t.userId === user.id).slice(0, 50)
+
+  const todayKey = new Date().toISOString().slice(0, 10)
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayKey = yesterday.toISOString().slice(0, 10)
+  const groupedByDate = personalLog.reduce((acc, t) => {
+    const key = t.at ? new Date(t.at).toISOString().slice(0, 10) : todayKey
+    if (!acc[key]) acc[key] = []
+    acc[key].push(t)
+    return acc
+  }, {})
+  const orderedDateKeys = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a))
+  const dateLabel = (key) => {
+    if (key === todayKey) return 'Сегодня'
+    if (key === yesterdayKey) return 'Вчера'
+    return new Date(key + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+  }
 
   const showToast = (message, variant = 'success') => {
     onShowToast?.({ message, variant })
@@ -250,18 +270,14 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         readOnly && 'opacity-80 cursor-default pointer-events-none'
       )}
     >
-      {/* Header: Avatar + name + Wallet (Quick Calculator) trigger */}
+      {/* Header: Pixel art avatar + name + Wallet (Quick Calculator) trigger */}
       <div className="flex items-center gap-3 sm:gap-4 mb-3 shrink-0">
         <div className="relative shrink-0">
-          <div
-            className={cn(
-              'hud-player-avatar items-center justify-center',
-              theme.avatarBorder,
-              avatarShake && 'animate-shake'
-            )}
-          >
-            <Helmet className="h-6 w-6 sm:h-7 sm:w-7" />
-          </div>
+          <PilotAvatar
+            pilotId={user.id}
+            size="column"
+            className={cn(avatarShake && 'animate-shake')}
+          />
           {floatEarn !== null && (
             <span
               key={floatEarn}
@@ -370,49 +386,64 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         </div>
       </div>
 
-      {/* Personal Log — last 5 actions for this user, undo [x] */}
-      <div className="mt-3 shrink-0 rounded-2xl border-2 border-slate-600/60 bg-slate-800/80 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-        <h3 className="font-mono text-[10px] text-slate-500 uppercase tracking-wider px-2 py-1.5 border-b border-slate-700/50">
-          Журнал
+      {/* Transaction History — last 50, terminal style, delete with refund */}
+      <div className="mt-3 flex-1 flex flex-col rounded-2xl border-2 border-slate-600/60 bg-slate-900/95 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.3)] min-h-[400px]">
+        <h3 className="font-mono text-[10px] text-slate-500 uppercase tracking-wider px-2 py-1.5 border-b border-slate-700/50 shrink-0">
+          Журнал операций
         </h3>
-        <ul className="font-hud-nums text-[11px] text-slate-400 space-y-0.5 max-h-[150px] overflow-y-auto px-2 py-1.5">
+        <ul className="font-mono text-[11px] text-slate-400 space-y-0 overflow-y-auto flex-1 min-h-0 px-2 py-1.5 list-none [scrollbar-color:theme(colors.slate.600)_transparent)]">
           {personalLog.length === 0 ? (
-            <li className="text-slate-600 py-2">— записей нет</li>
+            <li className="text-slate-600 py-3">— записей нет</li>
           ) : (
-            personalLog.map((t, i) => {
-              const isEarn = t.amount > 0
-              const hasId = !!t.id
-              return (
-                <li
-                  key={t.id ?? `log-${t.at}-${i}`}
-                  className="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-800/50 group"
-                >
-                  <span className="tabular-nums text-slate-600 shrink-0 w-12 text-[10px]">
-                    {formatTime(t.at)}
-                  </span>
-                  <span className="flex-1 truncate text-slate-300 min-w-0">{t.description}</span>
-                  <span
-                    className={cn(
-                      'tabular-nums shrink-0 w-9 text-right text-xs font-medium',
-                      isEarn ? 'text-emerald-400' : 'text-red-400'
-                    )}
-                  >
-                    {isEarn ? `+${t.amount}` : t.amount}
-                  </span>
-                  {hasId && isCommander && (
-                    <button
-                      type="button"
-                      onClick={() => onRemoveTransaction?.(t.id)}
-                      className="shrink-0 p-1 rounded text-red-400/80 hover:text-red-400 hover:bg-red-500/20 transition opacity-70 group-hover:opacity-100 font-mono text-xs"
-                      aria-label="Отменить"
-                      title="Отменить"
-                    >
-                      [×]
-                    </button>
-                  )}
-                </li>
-              )
-            })
+            orderedDateKeys.map((dateKey) => (
+              <li key={dateKey} className="list-none">
+                <div className="sticky top-0 z-10 bg-slate-900/98 py-1 font-mono text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-700/50">
+                  {dateLabel(dateKey)}
+                </div>
+                <ul className="list-none space-y-0">
+                  {groupedByDate[dateKey].map((t, i) => {
+                    const isEarn = t.amount > 0
+                    const hasId = !!t.id && !String(t.id).startsWith('temp-')
+                    const handleDelete = () => {
+                      const msg = isEarn
+                        ? `Удалить запись (+${t.amount} XP) и списать ${t.amount} XP?`
+                        : `Удалить запись (${t.amount} XP) и вернуть ${Math.abs(t.amount)} XP?`
+                      if (window.confirm(msg)) onRemoveTransaction?.(t.id)
+                    }
+                    return (
+                      <li
+                        key={t.id ?? `log-${t.at}-${i}`}
+                        className="flex items-center gap-2 py-1.5 px-1.5 rounded hover:bg-slate-800/60 group border-b border-slate-800/50 last:border-b-0"
+                      >
+                        <span className="tabular-nums text-slate-500 shrink-0 w-14 text-[10px]">
+                          {formatTime(t.at)}
+                        </span>
+                        <span className="flex-1 truncate text-slate-300 min-w-0 text-[11px]">{t.description}</span>
+                        <span
+                          className={cn(
+                            'tabular-nums shrink-0 w-10 text-right text-xs font-semibold',
+                            isEarn ? 'text-emerald-400' : 'text-red-400'
+                          )}
+                        >
+                          {isEarn ? `+${t.amount}` : t.amount}
+                        </span>
+                        {hasId && isCommander && (
+                          <button
+                            type="button"
+                            onClick={handleDelete}
+                            className="shrink-0 p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/20 transition opacity-60 group-hover:opacity-100"
+                            aria-label="Удалить и вернуть XP"
+                            title={isEarn ? 'Удалить и списать XP' : 'Удалить и вернуть XP'}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                          </button>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </li>
+            ))
           )}
         </ul>
       </div>
@@ -530,6 +561,55 @@ function Modal({ title, children, onClose }) {
           </button>
         </div>
         <div className="p-4">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Wheel of Fortune: pilot selector (single) + Casino Chip button. Chip only clickable when one pilot selected. */
+function WheelTrigger({ wheelPilot, setWheelPilot, onOpenWheel }) {
+  const canSpin = wheelPilot === 'roma' || wheelPilot === 'kirill'
+
+  return (
+    <div className="shrink-0 flex flex-col gap-2">
+      <h3 className="font-mono text-xs text-slate-400 uppercase tracking-wider">
+        Колесо фортуны
+      </h3>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex rounded-lg border border-slate-600/60 overflow-hidden">
+          {[
+            { id: 'roma', label: 'Рома', theme: 'border-roma/50 bg-roma/15 text-roma' },
+            { id: 'kirill', label: 'Кирилл', theme: 'border-kirill/50 bg-kirill/15 text-kirill' },
+          ].map(({ id, label, theme }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setWheelPilot((p) => (p === id ? null : id))}
+              className={cn(
+                'min-h-[40px] px-3 py-2 font-mono text-xs font-bold uppercase border-r border-slate-600 last:border-r-0 transition touch-manipulation',
+                wheelPilot === id ? theme : 'bg-slate-800/50 text-slate-500 hover:text-slate-400'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onOpenWheel}
+          disabled={!canSpin}
+          className={cn(
+            'flex items-center justify-center gap-1.5 min-h-[40px] px-4 py-2 rounded-lg font-mono text-xs font-bold uppercase border-2 transition touch-manipulation',
+            canSpin
+              ? 'border-amber-500/70 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
+              : 'border-slate-600 bg-slate-800/50 text-slate-500 cursor-not-allowed'
+          )}
+          aria-label={canSpin ? 'Крутить колесо фортуны' : 'Выберите одного пилота (Рома или Кирилл)'}
+          title={canSpin ? 'Испытать удачу' : 'Выберите одного пилота'}
+        >
+          <Coins className="w-4 h-4" strokeWidth={2.5} aria-hidden />
+          Крутить
+        </button>
       </div>
     </div>
   )
@@ -814,6 +894,17 @@ export function Dashboard({ mode = 'pilot' }) {
   const panelLocked = useAppStore((s) => s.panelLocked)
   const [roma, kirill] = users
   const [toast, setToast] = useState(null)
+  const [wheelPilot, setWheelPilot] = useState(null) // 'roma' | 'kirill' | null — single pilot for wheel
+  const [wheelOpen, setWheelOpen] = useState(false)
+  const lastOfflineSyncToast = useAppStore((s) => s.lastOfflineSyncToast)
+  const clearLastOfflineSyncToast = useAppStore((s) => s.clearLastOfflineSyncToast)
+
+  useEffect(() => {
+    if (lastOfflineSyncToast) {
+      setToast({ message: lastOfflineSyncToast.message, variant: 'default' })
+      clearLastOfflineSyncToast()
+    }
+  }, [lastOfflineSyncToast, clearLastOfflineSyncToast])
 
   const isPilot = mode === 'pilot'
   const isCommander = mode === 'commander'
@@ -846,9 +937,11 @@ export function Dashboard({ mode = 'pilot' }) {
   return (
     <KioskLayout>
       <Header />
-      <WeekProgressBar />
-      <main className="dashboard-grid flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden gap-4 p-4">
-        {/* LEFT PANEL — Pilots */}
+      <SchoolSchedule />
+      <main className="dashboard-grid flex-1 min-h-0 flex flex-col overflow-y-auto p-4">
+        {/* 2-column grid: Left = Pilots, Right = Control Center */}
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden gap-4">
+        {/* LEFT COLUMN — Pilots (Roma / Kirill cards) */}
         <section className="dashboard-left flex flex-col min-h-0 lg:min-h-0 panel-glass rounded-2xl p-5 relative">
           <span className="panel-bolt bolt-tl" aria-hidden />
           <span className="panel-bolt bolt-tr" aria-hidden />
@@ -921,14 +1014,29 @@ export function Dashboard({ mode = 'pilot' }) {
           <span className="panel-bolt bolt-br" aria-hidden />
           <h2 className="font-gaming text-base text-slate-400 mb-3 shrink-0 uppercase tracking-wider">ЦЕНТР УПРАВЛЕНИЯ</h2>
           <div className="flex flex-1 flex-col gap-4 min-h-0 overflow-auto">
-            <ControlCenter />
+            <RaidBoss isCommander={isCommander} />
+            <ControlCenter
+              wheelPilot={wheelPilot}
+              setWheelPilot={setWheelPilot}
+              setWheelOpen={setWheelOpen}
+            />
             <TodayStats />
+            <WheelTrigger
+              wheelPilot={wheelPilot}
+              setWheelPilot={setWheelPilot}
+              onOpenWheel={() => setWheelOpen(true)}
+            />
             <div className="flex-1 min-h-0 flex flex-col">
               <MarketplaceSection />
             </div>
             {isCommander && <WeeklyAnalytics />}
           </div>
         </section>
+        </div>
+        {/* Footer: full-width Schedule below the 2-column grid */}
+        <div className="col-span-12 mt-4 w-full">
+          <WallSchedule />
+        </div>
       </main>
 
       {toast && (
@@ -938,6 +1046,8 @@ export function Dashboard({ mode = 'pilot' }) {
           onDone={() => setToast(null)}
         />
       )}
+
+      <WheelOfFortune open={wheelOpen} onClose={() => setWheelOpen(false)} />
     </KioskLayout>
   )
 }

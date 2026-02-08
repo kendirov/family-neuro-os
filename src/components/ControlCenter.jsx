@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/useAppStore'
 import { playEngineRev, playCashRegister, playError, playBurnTick } from '@/lib/sounds'
 import { cn } from '@/lib/utils'
 import { PilotEngine } from '@/components/PilotEngine'
+import { WheelBanner } from '@/components/WheelBanner'
 
 const MODES = [
   { id: 'game', label: 'ИГРАТЬ', Icon: Gamepad2, color: 'blue' },
@@ -155,18 +156,20 @@ function DailyFlightLog() {
 /**
  * Control Center: Combustion Engine timer.
  * 1 Credit = 1 Minute (будни: после 60 мин — 2 кр/мин). Pilot toggles. Session summary on STOP.
+ * Optional: wheelPilot, setWheelPilot, setWheelOpen for WheelBanner (always clickable; opens selector if no pilot).
  */
-export function ControlCenter() {
+export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) {
   const users = useAppStore((s) => s.users)
   const pilots = useAppStore((s) => s.pilots)
-  const spendPoints = useAppStore((s) => s.spendPoints)
-  const addGamingMinutesToday = useAppStore((s) => s.addGamingMinutesToday)
+  const updateSessionBurn = useAppStore((s) => s.updateSessionBurn)
   const getGamingMinutesToday = useAppStore((s) => s.getGamingMinutesToday)
   const startEngineStore = useAppStore((s) => s.startEngine)
   const pauseEngineStore = useAppStore((s) => s.pauseEngine)
   const resumeEngineStore = useAppStore((s) => s.resumeEngine)
   const stopEngineStore = useAppStore((s) => s.stopEngine)
   const setPilotSessionMinutes = useAppStore((s) => s.setPilotSessionMinutes)
+  const updateLastBurnAt = useAppStore((s) => s.updateLastBurnAt)
+  const setLastOfflineSyncToast = useAppStore((s) => s.setLastOfflineSyncToast)
 
   const [mode, setMode] = useState('game')
   const [tick, setTick] = useState(0)
@@ -179,16 +182,28 @@ export function ControlCenter() {
 
   const anyRunning = (pilots?.roma?.status === 'RUNNING') || (pilots?.kirill?.status === 'RUNNING')
 
-  /** Per-pilot elapsed seconds for display (refs + tick for re-render). */
+  /** Per-pilot elapsed: prefer startTimeRef when set (pause/resume), else drift-free from sessionStartAt (server). */
+  const romaStartMs =
+    startTimeRef.current.roma
+      ? startTimeRef.current.roma
+      : pilots?.roma?.sessionStartAt
+        ? new Date(pilots.roma.sessionStartAt).getTime()
+        : Date.now()
+  const kirillStartMs =
+    startTimeRef.current.kirill
+      ? startTimeRef.current.kirill
+      : pilots?.kirill?.sessionStartAt
+        ? new Date(pilots.kirill.sessionStartAt).getTime()
+        : Date.now()
   const romaElapsedSeconds =
     pilots?.roma?.status === 'RUNNING'
-      ? (Date.now() / 1000 - (startTimeRef.current.roma || Date.now()) / 1000) | 0
+      ? (Date.now() / 1000 - romaStartMs / 1000) | 0
       : pilots?.roma?.status === 'PAUSED'
         ? (pausedElapsedRef.current.roma || 0) | 0
         : 0
   const kirillElapsedSeconds =
     pilots?.kirill?.status === 'RUNNING'
-      ? (Date.now() / 1000 - (startTimeRef.current.kirill || Date.now()) / 1000) | 0
+      ? (Date.now() / 1000 - kirillStartMs / 1000) | 0
       : pilots?.kirill?.status === 'PAUSED'
         ? (pausedElapsedRef.current.kirill || 0) | 0
         : 0
@@ -240,34 +255,46 @@ export function ControlCenter() {
     lastDeductedMinuteRef.current[id] = 0
   }
 
-  /** Tick every 1000ms for UI timer; store session MINUTES (not seconds) so deduction runs once per minute. */
+  /** Tick every 1000ms: drift-free elapsed from sessionStartAt (or startTimeRef); store session MINUTES for deduction. */
   useEffect(() => {
     if (!anyRunning) return
     intervalRef.current = setInterval(() => {
       setTick((t) => t + 1)
       PILOT_IDS.forEach((id) => {
         if (pilots?.[id]?.status !== 'RUNNING') return
-        const start = startTimeRef.current[id] || Date.now()
-        const elapsedSeconds = (Date.now() - start) / 1000
-        const sessionMinutes = Math.floor(elapsedSeconds / 60)
+        const p = pilots[id]
+        const startMs = p?.sessionStartAt ? new Date(p.sessionStartAt).getTime() : (startTimeRef.current[id] || Date.now())
+        const elapsedSeconds = (Date.now() - startMs) / 1000
+        const rawMinutes = Math.floor(elapsedSeconds / 60)
+        const cap = p?.sessionBalanceAtStart != null ? p.sessionBalanceAtStart : Infinity
+        const sessionMinutes = Math.min(rawMinutes, cap)
         setPilotSessionMinutes(id, sessionMinutes)
       })
     }, 1000)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [anyRunning, setPilotSessionMinutes, pilots?.roma?.status, pilots?.kirill?.status])
+  }, [anyRunning, setPilotSessionMinutes, pilots?.roma?.status, pilots?.kirill?.status, pilots?.roma?.sessionStartAt, pilots?.kirill?.sessionStartAt])
 
   /**
    * Per-MINUTE deduction only: for each RUNNING pilot, deduct 1 XP (or 2 on weekday overdrive) per elapsed minute.
-   * Weekend (Sat/Sun): rate is ALWAYS 1x — overdrive explicitly disabled.
-   * Safety: if balance <= 0 at any point, force stop engine (no negative debt).
+   * Uses the ACTIVE session transaction ID (pilot.activeSessionId). We only UPDATE that single row via
+   * updateSessionBurn — never create/insert a new transaction in this loop.
+   * Weekend (Sat/Sun): rate is ALWAYS 1x. Safety: if balance <= 0, force stop engine.
    */
   useEffect(() => {
     PILOT_IDS.forEach((id) => {
       const p = pilots?.[id]
       if (p?.status !== 'RUNNING') return
       const currentMinute = p.sessionMinutes ?? 0
+      const cap = p?.sessionBalanceAtStart != null ? p.sessionBalanceAtStart : Infinity
+      if (currentMinute > cap) {
+        playError()
+        stopEngineStore(id)
+        setLastOfflineSyncToast({ message: 'Двигатель остановлен: кончилось топливо (защита от минуса)' })
+        lastDeductedMinuteRef.current[id] = 0
+        return
+      }
       const oldLast = lastDeductedMinuteRef.current[id] ?? 0
       if (currentMinute <= oldLast) return
 
@@ -280,10 +307,10 @@ export function ControlCenter() {
         return
       }
 
-      const reason = (p.mode === 'youtube' ? 'Ютуб / Мультики' : 'Игровое время')
       const weekend = !isWeekday() // Sat/Sun: never overdrive, always 1 XP/min
+      const maxMinute = Math.min(currentMinute, cap)
       let burned = 0
-      for (let m = oldLast + 1; m <= currentMinute; m++) {
+      for (let m = oldLast + 1; m <= maxMinute; m++) {
         const nowState = useAppStore.getState()
         const pilotUser = nowState.users.find((x) => x.id === id)
         if (!pilotUser || pilotUser.balance <= 0) {
@@ -294,21 +321,35 @@ export function ControlCenter() {
         }
         const totalBeforeThisMinute = nowState.getGamingMinutesToday()
         const rate = weekend ? 1 : totalBeforeThisMinute + 1 > 60 ? 2 : 1
-        spendPoints(id, rate, reason)
-        addGamingMinutesToday(1, p.mode ?? 'game', [id])
-        burned += rate
+        const amount = Math.min(rate, pilotUser.balance)
+        if (amount <= 0) break
+        updateSessionBurn(id, amount, m, p.mode ?? 'game')
+        burned += amount
       }
       if (burned > 0) playBurnTick()
-      lastDeductedMinuteRef.current[id] = currentMinute
+      lastDeductedMinuteRef.current[id] = maxMinute
       setSessionCreditsBurned((prev) => prev + burned)
+      updateLastBurnAt(id)
+      if (maxMinute >= cap) {
+        setLastOfflineSyncToast({ message: 'Двигатель остановлен: кончилось топливо (защита от минуса)' })
+      }
     })
-  }, [pilots?.roma?.sessionMinutes, pilots?.roma?.status, pilots?.kirill?.sessionMinutes, pilots?.kirill?.status, spendPoints, addGamingMinutesToday, stopEngineStore])
+  }, [pilots?.roma?.sessionMinutes, pilots?.roma?.status, pilots?.kirill?.sessionMinutes, pilots?.kirill?.status, pilots?.roma?.sessionBalanceAtStart, pilots?.kirill?.sessionBalanceAtStart, updateSessionBurn, stopEngineStore, updateLastBurnAt, setLastOfflineSyncToast])
 
   const bothCanStart =
     users.find((u) => u.id === 'roma')?.balance >= 1 && users.find((u) => u.id === 'kirill')?.balance >= 1
 
   return (
     <div className="rounded-2xl border-[3px] border-slate-600 bg-slate-800/95 p-4 sm:p-5 shrink-0 flex flex-col gap-4 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
+      {/* Wheel of Fortune — banner always clickable; opens wheel or pilot selector */}
+      {typeof setWheelOpen === 'function' && (
+        <WheelBanner
+          wheelPilot={wheelPilot}
+          setWheelPilot={setWheelPilot}
+          setWheelOpen={setWheelOpen}
+        />
+      )}
+
       <h3 className="font-gaming text-xs text-slate-400 uppercase tracking-wider">
         Двигатель сгорания
       </h3>

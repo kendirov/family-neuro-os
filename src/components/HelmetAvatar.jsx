@@ -1,3 +1,33 @@
+/** DiceBear pixel-art avatar URLs (no API key). */
+const PIXEL_AVATAR = {
+  roma: 'https://api.dicebear.com/9.x/pixel-art/svg?seed=Roma&backgroundColor=b6e3f4',
+  kirill: 'https://api.dicebear.com/9.x/pixel-art/svg?seed=Kirill&backgroundColor=c0aede',
+}
+
+/**
+ * Pixel art avatar for pilot column or engine card.
+ * @param {'roma'|'kirill'} pilotId
+ * @param {'column'|'engine'} size - column = larger (w-16 h-16), engine = smaller (w-10 h-10)
+ */
+export function PilotAvatar({ pilotId, size = 'column', className = '' }) {
+  const src = PIXEL_AVATAR[pilotId] ?? PIXEL_AVATAR.roma
+  const isRoma = pilotId === 'roma'
+  const sizeClass = size === 'column' ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10'
+  const borderGlow = isRoma
+    ? 'border-4 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.6)]'
+    : 'border-4 border-purple-400 shadow-[0_0_15px_rgba(192,132,252,0.6)]'
+
+  return (
+    <img
+      src={src}
+      alt=""
+      className={`rounded-full object-cover ${sizeClass} ${borderGlow} ${className}`.trim()}
+      width={size === 'column' ? 80 : 40}
+      height={size === 'column' ? 80 : 40}
+    />
+  )
+}
+
 /**
  * Turbo Garage avatars: Blue Racer Helmet (Roma), Purple Space Pilot Helmet (Kirill).
  * Boyish, futuristic placeholder icons.

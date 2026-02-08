@@ -5,15 +5,14 @@ import { cn } from '@/lib/utils'
 
 const LONG_PRESS_MS = 800
 
-/** Display order: Mon–Fri then Sat–Sun. getDay(): 0=Sun, 1=Mon, …, 6=Sat */
+/** Display order: Mon–Sun. getDay(): 0=Sun, 1=Mon, …, 6=Sat */
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 const DAY_LABELS = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС']
 
-function formatTimeFull(date) {
+function formatTimeHHMM(date) {
   return date.toLocaleTimeString('ru-RU', {
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
     hour12: false,
   })
 }
@@ -27,6 +26,7 @@ function formatDateShort(date) {
 
 export function Header() {
   const [now, setNow] = useState(() => new Date())
+  const users = useAppStore((s) => s.users)
   const panelLocked = useAppStore((s) => s.panelLocked)
   const setPanelLocked = useAppStore((s) => s.setPanelLocked)
   const longPressTimerRef = useRef(null)
@@ -57,92 +57,72 @@ export function Header() {
 
   const dayIndex = now.getDay()
   const weekend = dayIndex === 0 || dayIndex === 6
+  const statusLabel = weekend ? 'ВЫХОДНОЙ' : 'БУДНИ'
 
-  /** Index in DAY_ORDER for current day (0..6) */
-  const activeDayOrderIndex = DAY_ORDER.indexOf(dayIndex)
+  const roma = users?.find((u) => u.id === 'roma')
+  const kirill = users?.find((u) => u.id === 'kirill')
 
   return (
-    <header className="shrink-0 flex flex-col" role="banner">
-      {/* Chrono-Stream: unified Timeline Rail (~80px) */}
-      <div className="chrono-stream-rail relative min-h-[80px] flex items-stretch overflow-hidden">
-        {/* Glass panel */}
-        <div className="chrono-stream-glass absolute inset-0" aria-hidden />
-
-        {/* Time Axis: horizontal line through the middle — weekday grey, weekend gold/green */}
-        <div
-          className="chrono-stream-axis absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 z-0"
-          aria-hidden
-        />
-
-        {/* Nodes container: 7 equal columns, no gaps */}
-        <div className="relative z-10 flex flex-1 w-full min-w-0">
-          {DAY_ORDER.map((d, i) => {
+    <header className="command-bridge shrink-0" role="banner">
+      <div className="command-bridge-glass flex w-full items-center gap-4 px-3 py-2.5 md:px-4 md:py-3">
+        {/* Left: Week Strip — fixed Mon–Sun */}
+        <div className="week-strip flex shrink-0 items-center gap-0.5 rounded-xl border border-slate-600/50 bg-slate-900/60 px-1.5 py-1.5">
+          {DAY_ORDER.map((d) => {
             const isWeekend = d === 0 || d === 6
             const isActive = d === dayIndex
-            const isPast = i < activeDayOrderIndex
-            const isFuture = i > activeDayOrderIndex
-
             return (
               <div
                 key={d}
                 className={cn(
-                  'chrono-node-cell flex flex-col items-center justify-center flex-1 min-w-0 relative',
-                  isActive && 'chrono-node-cell-active'
+                  'week-slot flex min-w-[28px] justify-center rounded-lg px-1 py-1 font-lcd text-xs font-bold tabular-nums transition-colors sm:min-w-[32px] sm:text-sm',
+                  isActive && 'week-slot-active',
+                  !isActive && isWeekend && 'week-slot-weekend',
+                  !isActive && !isWeekend && 'week-slot-weekday'
                 )}
+                aria-current={isActive ? 'date' : undefined}
               >
-                {/* Node on the line: label above, dot on axis, meta below (active only) */}
-                <div
-                  className={cn(
-                    'chrono-node relative flex flex-col items-center justify-center shrink-0',
-                    isPast && 'chrono-node-past',
-                    isActive && 'chrono-node-active',
-                    isFuture && 'chrono-node-future',
-                    isWeekend && !isActive && 'chrono-node-weekend'
-                  )}
-                  aria-current={isActive ? 'date' : undefined}
-                >
-                  {isActive && <span className="chrono-node-bracket" aria-hidden />}
-                  <span
-                    className={cn(
-                      'chrono-node-label font-lcd font-bold tabular-nums order-first',
-                      isActive ? 'text-base sm:text-lg' : 'text-[10px] sm:text-xs'
-                    )}
-                  >
-                    {DAY_LABELS[i]}
-                  </span>
-                  <span className="chrono-node-dot" />
-                  {/* Below dot for current day: date, time, "РАСПИСАНИЕ" */}
-                  {isActive && (
-                    <div className="chrono-current-meta flex flex-col items-center gap-0.5 min-w-0 mt-0.5">
-                      <time
-                        dateTime={now.toISOString()}
-                        className="chrono-datetime font-lcd text-xs sm:text-sm font-bold tabular-nums text-cyan-300/95 whitespace-nowrap"
-                      >
-                        {formatDateShort(now)}, {formatTimeFull(now)}
-                      </time>
-                      <span className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-slate-400">
-                        РАСПИСАНИЕ
-                      </span>
-                    </div>
-                  )}
-                </div>
+                {DAY_LABELS[DAY_ORDER.indexOf(d)]}
               </div>
             )
           })}
         </div>
 
-        {/* Left: compact brand */}
-        <div className="relative z-20 flex items-center pl-2 sm:pl-3 shrink-0">
-          <span className="font-mono text-[10px] sm:text-xs font-medium tracking-widest text-slate-500 uppercase hidden sm:inline">
-            ТУРБО-ГАРАЖ v2.7
-          </span>
+        {/* Center: Total XP summary — mini-badges */}
+        <div className="xp-summary flex flex-1 justify-center gap-2 sm:gap-3">
+          {roma != null && (
+            <span className="xp-badge flex items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-cyan-300 sm:text-xs">
+              <span className="uppercase tracking-wider text-cyan-400/90">Рома</span>
+              <span className="font-lcd">{roma.balance ?? 0}</span>
+            </span>
+          )}
+          {kirill != null && (
+            <span className="xp-badge flex items-center gap-1.5 rounded-lg border border-purple-500/50 bg-purple-500/15 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-purple-300 sm:text-xs">
+              <span className="uppercase tracking-wider text-purple-400/90">Кирилл</span>
+              <span className="font-lcd">{kirill.balance ?? 0}</span>
+            </span>
+          )}
         </div>
 
-        {/* Lock button: right edge */}
-        <div className="relative z-20 flex items-center pr-2 sm:pr-3 shrink-0">
+        {/* Right: Clock, Date, Status, Lock */}
+        <div className="status-bar flex shrink-0 items-center gap-2 md:gap-3">
+          <span
+            className="status-label hidden rounded border border-slate-600/60 bg-slate-800/60 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400 sm:inline"
+            title={weekend ? 'Выходной — без лимита' : 'Будни — лимит 1 ч'}
+          >
+            {statusLabel}
+          </span>
+          <time
+            dateTime={now.toISOString()}
+            className="command-bridge-clock font-lcd text-lg font-bold tabular-nums text-cyan-300/95 sm:text-xl"
+          >
+            {formatTimeHHMM(now)}
+          </time>
+          <span className="command-bridge-date hidden font-mono text-[10px] tabular-nums text-slate-500 sm:inline md:text-xs">
+            {formatDateShort(now)}
+          </span>
           <button
             type="button"
-            className="flex items-center justify-center w-9 h-9 rounded-xl border-2 border-slate-600/80 bg-slate-800/80 text-slate-300 hover:text-slate-100 hover:border-slate-500 transition touch-manipulation select-none icon-pop"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-2 border-slate-600/80 bg-slate-800/80 text-slate-300 transition hover:border-slate-500 hover:text-slate-100 touch-manipulation select-none icon-pop"
             aria-label={panelLocked ? 'Панель заблокирована — долгое нажатие для разблокировки' : 'Панель разблокирована — долгое нажатие для блокировки'}
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
@@ -150,19 +130,9 @@ export function Header() {
             onPointerCancel={handlePointerUp}
             onContextMenu={handleContextMenu}
           >
-            {panelLocked ? <Lock className="w-4 h-4" strokeWidth={2.5} /> : <Unlock className="w-4 h-4" strokeWidth={2.5} />}
+            {panelLocked ? <Lock className="h-4 w-4" strokeWidth={2.5} /> : <Unlock className="h-4 w-4" strokeWidth={2.5} />}
           </button>
         </div>
-      </div>
-
-      {/* Status line below the rail */}
-      <div
-        className={cn(
-          'px-4 md:px-6 py-1.5 font-mono text-[10px] sm:text-xs font-bold uppercase tracking-widest text-center border-b border-slate-700/50',
-          weekend ? 'text-emerald-400/95 bg-emerald-500/10' : 'text-amber-400/95 bg-amber-500/10'
-        )}
-      >
-        {weekend ? 'СТАТУС: ВЫХОДНОЙ (БЕЗЛИМИТ) 🏖' : 'СТАТУС: БУДНИ (ЛИМИТ 1 ЧАС) 🏫'}
       </div>
     </header>
   )

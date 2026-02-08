@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { Play, Pause, Square, Fan } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
 import { playEngineRev, playCashRegister, playError } from '@/lib/sounds'
-import { BlueRacerHelmet, PurplePilotHelmet } from '@/components/HelmetAvatar'
+import { PilotAvatar } from '@/components/HelmetAvatar'
 import { cn } from '@/lib/utils'
 
 function getDateKey() {
@@ -24,14 +24,12 @@ function formatElapsed(seconds) {
 const PILOT_CONFIG = {
   roma: {
     name: 'Рома',
-    Helmet: BlueRacerHelmet,
     glowClass: 'shadow-[0_0_20px_rgba(34,211,238,0.4)] border-cyan-500/70',
     textClass: 'text-cyan-300',
     bgGlow: 'bg-cyan-500/10',
   },
   kirill: {
     name: 'Кирилл',
-    Helmet: PurplePilotHelmet,
     glowClass: 'shadow-[0_0_20px_rgba(168,85,247,0.4)] border-purple-500/70',
     textClass: 'text-purple-300',
     bgGlow: 'bg-purple-500/10',
@@ -51,7 +49,7 @@ export function PilotEngine({ id, elapsedSeconds = 0, mode = 'game', onStartRefs
   const stopEngineStore = useAppStore((s) => s.stopEngine)
 
   const config = PILOT_CONFIG[id] ?? PILOT_CONFIG.roma
-  const { name, Helmet, glowClass, textClass, bgGlow } = config
+  const { name, glowClass, textClass, bgGlow } = config
   const status = pilot?.status ?? 'IDLE'
   const isRunning = status === 'RUNNING'
   const isPaused = status === 'PAUSED'
@@ -129,36 +127,39 @@ export function PilotEngine({ id, elapsedSeconds = 0, mode = 'game', onStartRefs
         </div>
       )}
 
-      {/* Header: name + avatar */}
+      {/* Header: pixel art avatar + name */}
       <div className={cn('flex items-center gap-3 mb-3', textClass)}>
-        <div
-          className={cn(
-            'flex items-center justify-center w-10 h-10 rounded-xl border-2 shrink-0',
-            id === 'roma' ? 'border-cyan-500/50 bg-cyan-500/20' : 'border-purple-500/50 bg-purple-500/20'
-          )}
-        >
-          <Helmet className="h-6 w-6" />
-        </div>
+        <PilotAvatar pilotId={id} size="engine" />
         <span className="font-gaming text-base font-bold uppercase tracking-wider">{name}</span>
       </div>
 
       {/* Large digital timer + animated icon when active */}
-      <div className="flex items-center justify-center gap-2 mb-3">
-        <div className="font-lcd text-3xl sm:text-4xl font-black tabular-nums text-center py-3 flex-1 min-w-0 rounded-xl bg-slate-900/80 border border-slate-600/60 text-slate-100">
-          {formatElapsed(Math.max(0, Math.floor(elapsedSeconds)))}
+      <div className="flex flex-col gap-1.5 mb-3">
+        <div className="flex items-center justify-center gap-2">
+          <div className="font-lcd text-3xl sm:text-4xl font-black tabular-nums text-center py-3 flex-1 min-w-0 rounded-xl bg-slate-900/80 border border-slate-600/60 text-slate-100">
+            {formatElapsed(Math.max(0, Math.floor(elapsedSeconds)))}
+          </div>
+          {isRunning && (
+            <motion.div
+              className={cn(
+                'shrink-0 w-10 h-10 rounded-xl border-2 flex items-center justify-center',
+                id === 'roma' ? 'border-cyan-500/50 bg-cyan-500/20 text-cyan-400' : 'border-purple-500/50 bg-purple-500/20 text-purple-400'
+              )}
+              animate={{ rotate: 360 }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+              aria-hidden
+            >
+              <Fan className="h-5 w-5" strokeWidth={2} />
+            </motion.div>
+          )}
         </div>
-        {isRunning && (
-          <motion.div
-            className={cn(
-              'shrink-0 w-10 h-10 rounded-xl border-2 flex items-center justify-center',
-              id === 'roma' ? 'border-cyan-500/50 bg-cyan-500/20 text-cyan-400' : 'border-purple-500/50 bg-purple-500/20 text-purple-400'
-            )}
-            animate={{ rotate: 360 }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-            aria-hidden
-          >
-            <Fan className="h-5 w-5" strokeWidth={2} />
-          </motion.div>
+        {(isRunning || isPaused) && pilot?.sessionBalanceAtStart != null && (
+          <p className="font-mono text-[10px] text-slate-500 uppercase tracking-wider text-center">
+            Осталось примерно:{' '}
+            <span className="tabular-nums text-slate-400 font-bold">
+              {Math.max(0, Math.floor((pilot.sessionBalanceAtStart ?? 0) - (pilot.sessionMinutes ?? 0)))} мин
+            </span>
+          </p>
         )}
       </div>
 
