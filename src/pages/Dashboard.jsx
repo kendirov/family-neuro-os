@@ -93,7 +93,8 @@ const USER_THEMES = {
   },
 }
 
-function SupplyDepotColumn({ user, onShowToast, locked }) {
+function SupplyDepotColumn({ user, onShowToast, locked, readOnly }) {
+  const effectiveLocked = locked || readOnly
   const addPoints = useAppStore((s) => s.addPoints)
   const spendPoints = useAppStore((s) => s.spendPoints)
   const isDailyBaseComplete = useAppStore((s) => s.isDailyBaseComplete)
@@ -156,7 +157,8 @@ function SupplyDepotColumn({ user, onShowToast, locked }) {
     <div
       className={cn(
         'flex flex-1 flex-col min-w-0 min-h-[320px] rounded-xl panel-metal p-3 sm:p-4',
-        theme.border
+        theme.border,
+        readOnly && 'opacity-80 cursor-default pointer-events-none'
       )}
     >
       <span className="panel-bolt bolt-tl" aria-hidden />
@@ -221,12 +223,12 @@ function SupplyDepotColumn({ user, onShowToast, locked }) {
                 key={action.id}
                 type="button"
                 onClick={() => handleDailyClick(action, true)}
-                disabled={done || locked}
+                disabled={done || effectiveLocked}
                 className={cn(
                   btnBase,
                   'min-h-[40px] flex items-center justify-center gap-1 relative overflow-hidden',
                   done ? 'btn-daily-complete' : 'btn-routine',
-                  locked && 'opacity-60'
+                  effectiveLocked && 'opacity-60'
                 )}
               >
                 {done ? (
@@ -259,12 +261,12 @@ function SupplyDepotColumn({ user, onShowToast, locked }) {
                 <button
                   type="button"
                   onClick={() => handleDailyClick(row.main, true)}
-                  disabled={mainDone || locked}
+                  disabled={mainDone || effectiveLocked}
                   className={cn(
                     btnBase,
                     'min-h-[44px] flex-1 flex items-center justify-center gap-1.5 relative overflow-hidden',
                     mainDone ? 'btn-daily-complete' : 'btn-food',
-                    locked && 'opacity-60'
+                    effectiveLocked && 'opacity-60'
                   )}
                 >
                   {mainDone ? (
@@ -286,12 +288,12 @@ function SupplyDepotColumn({ user, onShowToast, locked }) {
                       key={mod.id}
                       type="button"
                       onClick={() => handleDailyClick(mod, true)}
-                      disabled={modDone || locked}
+                      disabled={modDone || effectiveLocked}
                       title={mod.label + ' +' + mod.credits}
                       className={cn(
                         'shrink-0 w-9 h-9 rounded-full border-2 font-mono text-xs font-bold shadow-[0_2px_0_0_rgba(0,0,0,0.2)] transition-all touch-manipulation',
                         modDone ? 'btn-daily-complete' : 'btn-food-modifier',
-                        locked && 'opacity-60'
+                        effectiveLocked && 'opacity-60'
                       )}
                     >
                       {modDone ? <Check className="h-4 w-4 mx-auto text-emerald-400" /> : mod.emoji}
@@ -315,12 +317,12 @@ function SupplyDepotColumn({ user, onShowToast, locked }) {
               key={action.id}
               type="button"
               onClick={() => handleMissionClick(action)}
-              disabled={locked}
+              disabled={effectiveLocked}
               className={cn(
                 btnBase,
                 action.big ? 'min-h-[48px] col-span-2' : 'min-h-[40px]',
                 styleClass(action.style ?? 'green'),
-                locked && 'opacity-60'
+                effectiveLocked && 'opacity-60'
               )}
             >
               <span className="text-base mr-1" aria-hidden>{action.emoji}</span>
@@ -346,10 +348,10 @@ function SupplyDepotColumn({ user, onShowToast, locked }) {
                 key={action.id}
                 type="button"
                 onClick={() => handlePenaltyClick(action)}
-                disabled={locked}
+                disabled={effectiveLocked}
                 className={cn(
                   'rounded-md py-2 px-2 font-mono font-medium border btn-danger-small flex items-center justify-center gap-1 min-h-[36px]',
-                  locked && 'opacity-60'
+                  effectiveLocked && 'opacity-60'
                 )}
               >
                 <span aria-hidden>{action.emoji}</span>
