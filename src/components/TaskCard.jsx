@@ -51,7 +51,11 @@ export function TaskCard({
           ? 'border-amber-500/60 shadow-[0_0_16px_rgba(251,191,36,0.25),0_4px_12px_rgba(0,0,0,0.3)]'
           : variant === 'morning'
             ? 'border-cyan-500/60 shadow-[0_0_16px_rgba(34,211,238,0.3),0_4px_12px_rgba(0,0,0,0.3)]'
-            : 'border-emerald-500/60 shadow-[0_0_16px_rgba(52,211,153,0.25),0_4px_12px_rgba(0,0,0,0.3)]'
+            : variant === 'school'
+              ? 'border-blue-500/60 shadow-[0_0_16px_rgba(59,130,246,0.3),0_4px_12px_rgba(0,0,0,0.3)]'
+              : variant === 'base'
+                ? 'border-slate-400/60 shadow-[0_0_16px_rgba(148,163,184,0.25),0_4px_12px_rgba(0,0,0,0.3)]'
+                : 'border-emerald-500/60 shadow-[0_0_16px_rgba(52,211,153,0.25),0_4px_12px_rgba(0,0,0,0.3)]'
 
   const bgActiveClass =
     accentColor === 'purple'
@@ -62,7 +66,11 @@ export function TaskCard({
           ? 'bg-amber-500/10 hover:bg-amber-500/20'
           : variant === 'morning'
             ? 'bg-cyan-500/10 hover:bg-cyan-500/20'
-            : 'bg-emerald-500/10 hover:bg-emerald-500/20'
+            : variant === 'school'
+              ? 'bg-blue-500/10 hover:bg-blue-500/20'
+              : variant === 'base'
+                ? 'bg-slate-500/10 hover:bg-slate-500/20'
+                : 'bg-emerald-500/10 hover:bg-emerald-500/20'
 
   return (
     <motion.button
@@ -103,7 +111,7 @@ export function TaskCard({
       }
       whileTap={!isCompleted && !disabled ? { scale: 0.98 } : undefined}
       aria-pressed={isCompleted}
-      aria-label={isCompleted ? `${label} — выполнено` : `${label} — +${reward} кр`}
+      aria-label={isCompleted ? `${label} — выполнено` : `${label} — ${reward >= 0 ? `+${reward}` : reward} XP`}
     >
       {/* Completion flash overlay (only on transition to done) */}
       {showCompleteFlash && (
@@ -131,16 +139,18 @@ export function TaskCard({
         </span>
       </div>
 
-      {/* Right: Reward badge */}
+      {/* Right: Reward badge (positive or penalty) */}
       <span
         className={cn(
           'shrink-0 font-gaming text-sm font-extrabold tabular-nums px-3 py-1 rounded-xl border-2 relative z-0 text-pop',
           isCompleted
             ? 'border-slate-600/50 text-slate-500 bg-slate-800/60'
-            : 'border-amber-500/40 text-amber-300 bg-amber-500/20'
+            : reward >= 0
+              ? 'border-amber-500/40 text-amber-300 bg-amber-500/20'
+              : 'border-red-500/40 text-red-300 bg-red-500/20'
         )}
       >
-        +{reward} кр
+        {reward >= 0 ? `+${reward}` : reward} ⚡ XP
       </span>
 
       {/* Done: massive stamped overlay */}

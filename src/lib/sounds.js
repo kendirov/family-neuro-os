@@ -218,3 +218,27 @@ function cashRegisterFallback() {
 export function playCashRegister() {
   playMp3('coin', cashRegisterFallback)
 }
+
+/** Very quiet tick when 1 XP is deducted each minute (burn cycle complete). */
+function burnTickFallback() {
+  try {
+    const ctx = getContext()
+    if (ctx.state === 'suspended') ctx.resume()
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(600, now)
+    gain.gain.setValueAtTime(0, now)
+    gain.gain.linearRampToValueAtTime(0.04, now + 0.01)
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06)
+    osc.start(now)
+    osc.stop(now + 0.06)
+  } catch (_) {}
+}
+
+export function playBurnTick() {
+  burnTickFallback()
+}

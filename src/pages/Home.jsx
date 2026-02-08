@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Settings, ShoppingCart, Gamepad2 } from 'lucide-react'
+import { ShoppingCart, Gamepad2 } from 'lucide-react'
 import { KioskLayout } from '@/components/Layout/KioskLayout'
 import { Header } from '@/components/Header'
 import { CountUpNumber } from '@/components/CountUpNumber'
@@ -43,7 +43,7 @@ export function Home() {
           </p>
 
           {/* Hero arcade buttons — dominate center */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5 w-full max-w-3xl mx-auto flex-1 min-h-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5 w-full max-w-3xl mx-auto flex-1 min-h-0">
             <Link
               to="/gaming"
               className={cn(
@@ -69,19 +69,6 @@ export function Home() {
             >
               <ShoppingCart className="w-8 h-8 md:w-10 md:h-10 shrink-0" strokeWidth={2.5} />
               <span>МАГАЗИН</span>
-            </Link>
-            <Link
-              to="/admin"
-              className={cn(
-                'flex flex-col items-center justify-center gap-2 md:gap-3 min-h-[100px] sm:min-h-[120px] md:min-h-[140px] rounded-xl font-mono font-bold text-lg md:text-xl uppercase tracking-wider',
-                'bg-emerald-500 text-slate-950 border-2 border-emerald-400/80',
-                'shadow-[0_0_20px_rgba(16,185,129,0.35)]',
-                'hover:scale-105 hover:brightness-110 hover:shadow-[0_0_32px_rgba(16,185,129,0.5)]',
-                'active:scale-[1.02] transition-all duration-200 ease-out touch-manipulation'
-              )}
-            >
-              <Settings className="w-8 h-8 md:w-10 md:h-10 shrink-0" strokeWidth={2.5} />
-              <span>БАЗА</span>
             </Link>
           </div>
 

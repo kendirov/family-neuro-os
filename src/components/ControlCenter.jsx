@@ -1,43 +1,17 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { Gamepad2, Tv } from 'lucide-react'
+import { Gamepad2, Tv, Flame } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
-import { playEngineRev, playCashRegister, playError } from '@/lib/sounds'
+import { playEngineRev, playCashRegister, playError, playBurnTick } from '@/lib/sounds'
 import { cn } from '@/lib/utils'
-
-/** Elapsed seconds → "00:15" or "01:05:00". */
-function formatElapsed(seconds) {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  }
-  return `${m}:${String(s).padStart(2, '0')}`
-}
+import { PilotEngine } from '@/components/PilotEngine'
 
 const MODES = [
   { id: 'game', label: 'ИГРАТЬ', Icon: Gamepad2, color: 'blue' },
   { id: 'youtube', label: 'ЮТУБ / МУЛЬТИКИ', Icon: Tv, color: 'pink' },
 ]
 
-const PILOT_IDS = ['roma', 'kirill'] // order for display
-
-/** Toggle pilot: single click = toggle that user ON/OFF; "Оба" = if any ON -> both OFF, else both ON. */
-function togglePilot(selectedIds, pilotId) {
-  if (pilotId === 'roma' || pilotId === 'kirill') {
-    const has = selectedIds.includes(pilotId)
-    return has ? selectedIds.filter((id) => id !== pilotId) : [...selectedIds, pilotId]
-  }
-  if (pilotId === 'both') {
-    const anyOn = selectedIds.length > 0
-    return anyOn ? [] : ['roma', 'kirill']
-  }
-  return selectedIds
-}
-
-/** Max minutes for fuel gauge visual (depletes over this range). */
-const FUEL_GAUGE_MAX_MIN = 60
+const PILOT_IDS = ['roma', 'kirill']
 
 /** Будни (Пн–Пт): до 1 ч — 1 кр/мин, после 1 ч — 2 кр/мин. Выходные — всегда 1 кр/мин. */
 function isWeekday() {
@@ -50,33 +24,86 @@ function getDateKey() {
   return new Date().toISOString().slice(0, 10)
 }
 
+/** Reactor Core: heat gauge for total daily play time. Weekday: 0–45 зелёный, 45–60 жёлтый, 60+ красный пульс. Weekend: фиолет/золото. */
+function ReactorCore() {
+  const gamingToday = useAppStore((s) => s.gamingToday)
+  const pilots = useAppStore((s) => s.pilots)
+  const totalDailyMinutes = useMemo(() => {
+    const today = getDateKey()
+    const saved = gamingToday?.dateKey === today ? (gamingToday?.minutes ?? 0) : 0
+    const roma = pilots?.roma?.sessionMinutes ?? 0
+    const kirill = pilots?.kirill?.sessionMinutes ?? 0
+    return saved + roma + kirill
+  }, [gamingToday, pilots])
+
+  const day = new Date().getDay()
+  const isWeekend = day === 0 || day === 6
+  const REACTOR_MAX_MIN = 60
+  const fillPercent = Math.min(100, (totalDailyMinutes / REACTOR_MAX_MIN) * 100)
+
+  let barBg = 'bg-cyan-500'
+  let statusText = 'НОРМА'
+  let statusClass = 'text-cyan-400'
+  let overheat = false
+  if (isWeekend) {
+    barBg = 'bg-gradient-to-r from-violet-500 to-amber-500'
+    statusText = 'РЕЖИМ: ВЫХОДНОЙ'
+    statusClass = 'text-amber-300'
+  } else {
+    if (totalDailyMinutes >= 60) {
+      barBg = 'bg-red-500'
+      statusText = 'ПЕРЕГРЕВ! РАСХОД x2 🔥'
+      statusClass = 'text-red-400'
+      overheat = true
+    } else if (totalDailyMinutes >= 45) {
+      barBg = 'bg-gradient-to-r from-amber-400 to-orange-500'
+      statusText = 'ВНИМАНИЕ'
+      statusClass = 'text-amber-400'
+    }
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-slate-600/70 bg-slate-800/90 p-3 shadow-[inset_0_2px_8px_rgba(0,0,0,0.3)]">
+      <p className="font-mono text-[10px] text-slate-500 uppercase tracking-wider mb-2">
+        Реактор (время за день)
+      </p>
+      <div className="relative h-8 rounded-lg bg-slate-900/80 border border-slate-600/60 overflow-hidden">
+        <motion.div
+          className={cn(
+            'reactor-core-bar absolute inset-y-0 left-0 rounded-lg',
+            barBg,
+            overheat && 'reactor-core-overheat'
+          )}
+          style={{ width: `${fillPercent}%` }}
+          transition={{ duration: 0.5 }}
+        />
+        <span
+          className="absolute inset-y-0 flex items-center pointer-events-none transition-all duration-500 -translate-x-1/2"
+          style={{ left: `${Math.min(100, Math.max(0, fillPercent))}%` }}
+          aria-hidden
+        >
+          <Flame className="h-5 w-5 text-white/90 drop-shadow-[0_0_4px_rgba(0,0,0,0.8)]" strokeWidth={2} />
+        </span>
+      </div>
+      <p className={cn('font-lcd text-xs font-bold uppercase tracking-wider mt-1.5', statusClass)}>
+        {statusText}
+      </p>
+      <p className="font-mono text-[10px] text-slate-500 tabular-nums mt-0.5">
+        {totalDailyMinutes} мин / {REACTOR_MAX_MIN} мин
+      </p>
+    </div>
+  )
+}
+
 /** Daily Flight Log: цифровая панель (LCD), колонки Рома/Кирилл, 🎮 Игра и 📺 Мультики. */
 function DailyFlightLog() {
-  const currentSessionMinutes = useAppStore((s) => s.currentSessionMinutes)
-  const currentSessionMode = useAppStore((s) => s.currentSessionMode)
-  const currentSessionPilotIds = useAppStore((s) => s.currentSessionPilotIds ?? [])
+  const pilots = useAppStore((s) => s.pilots ?? {})
   const dailyGamingBreakdown = useAppStore((s) => s.dailyGamingBreakdown ?? {})
 
   const dailyStats = useMemo(() => {
-    const today = getDateKey()
-    const saved = dailyGamingBreakdown[today] ?? {
-      game: { roma: 0, kirill: 0 },
-      youtube: { roma: 0, kirill: 0 },
-    }
-    const game = { roma: saved.game?.roma ?? 0, kirill: saved.game?.kirill ?? 0 }
-    const youtube = { roma: saved.youtube?.roma ?? 0, kirill: saved.youtube?.kirill ?? 0 }
-    if (currentSessionMinutes > 0 && currentSessionMode && currentSessionPilotIds.length > 0) {
-      const key = currentSessionMode === 'youtube' ? 'youtube' : 'game'
-      currentSessionPilotIds.forEach((id) => {
-        if (id === 'roma' || id === 'kirill') {
-          const cur = currentSessionMinutes
-          if (key === 'game') game[id] = (game[id] ?? 0) + cur
-          else youtube[id] = (youtube[id] ?? 0) + cur
-        }
-      })
-    }
-    return { game, youtube }
-  }, [currentSessionMinutes, currentSessionMode, currentSessionPilotIds, dailyGamingBreakdown])
+    const state = useAppStore.getState()
+    return state.getDisplayBreakdownToday()
+  }, [pilots, dailyGamingBreakdown])
 
   const { game, youtube } = dailyStats
 
@@ -131,137 +158,154 @@ function DailyFlightLog() {
  */
 export function ControlCenter() {
   const users = useAppStore((s) => s.users)
+  const pilots = useAppStore((s) => s.pilots)
   const spendPoints = useAppStore((s) => s.spendPoints)
   const addGamingMinutesToday = useAppStore((s) => s.addGamingMinutesToday)
   const getGamingMinutesToday = useAppStore((s) => s.getGamingMinutesToday)
-  const setCurrentSessionMinutes = useAppStore((s) => s.setCurrentSessionMinutes)
-  const setCurrentSessionInfo = useAppStore((s) => s.setCurrentSessionInfo)
+  const startEngineStore = useAppStore((s) => s.startEngine)
+  const pauseEngineStore = useAppStore((s) => s.pauseEngine)
+  const resumeEngineStore = useAppStore((s) => s.resumeEngine)
+  const stopEngineStore = useAppStore((s) => s.stopEngine)
+  const setPilotSessionMinutes = useAppStore((s) => s.setPilotSessionMinutes)
 
   const [mode, setMode] = useState('game')
-  /** Выбранные пилоты: массив id. Клик по имени — вкл/выкл; «Оба» — оба вкл или оба выкл. */
-  const [selectedPilotIds, setSelectedPilotIds] = useState(['roma'])
-  const [engineActive, setEngineActive] = useState(false)
-  const [enginePaused, setEnginePaused] = useState(false) // пауза: таймер не тикает, списание не идёт
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [tick, setTick] = useState(0)
   const [sessionCreditsBurned, setSessionCreditsBurned] = useState(0)
 
-  const lastDeductedMinuteRef = useRef(0)
+  const startTimeRef = useRef({ roma: 0, kirill: 0 })
+  const pausedElapsedRef = useRef({ roma: 0, kirill: 0 })
+  const lastDeductedMinuteRef = useRef({ roma: 0, kirill: 0 })
   const intervalRef = useRef(null)
-  const sessionStartRef = useRef(0)
-  const sessionCreditsBurnedRef = useRef(0)
-  const sessionStartSavedMinutesRef = useRef(0) // минут за день на старте сессии (для X1/X2)
-  sessionCreditsBurnedRef.current = sessionCreditsBurned
 
-  const reason = mode === 'game' ? 'Игровое время' : 'Ютуб / Мультики'
-  const selectedIds = selectedPilotIds
-  const creditsPerMinute = selectedIds.length
+  const anyRunning = (pilots?.roma?.status === 'RUNNING') || (pilots?.kirill?.status === 'RUNNING')
 
-  const canStart =
-    selectedIds.length > 0 &&
-    selectedIds.every((id) => {
-      const u = users.find((x) => x.id === id)
-      return u && u.balance >= 1
-    })
+  /** Per-pilot elapsed seconds for display (refs + tick for re-render). */
+  const romaElapsedSeconds =
+    pilots?.roma?.status === 'RUNNING'
+      ? (Date.now() / 1000 - (startTimeRef.current.roma || Date.now()) / 1000) | 0
+      : pilots?.roma?.status === 'PAUSED'
+        ? (pausedElapsedRef.current.roma || 0) | 0
+        : 0
+  const kirillElapsedSeconds =
+    pilots?.kirill?.status === 'RUNNING'
+      ? (Date.now() / 1000 - (startTimeRef.current.kirill || Date.now()) / 1000) | 0
+      : pilots?.kirill?.status === 'PAUSED'
+        ? (pausedElapsedRef.current.kirill || 0) | 0
+        : 0
 
-  const startEngine = () => {
-    if (!canStart || engineActive) return
-    playEngineRev()
-    sessionStartSavedMinutesRef.current = getGamingMinutesToday()
-    setCurrentSessionInfo(mode, selectedIds)
-    setEngineActive(true)
-    setEnginePaused(false)
-    setElapsedSeconds(0)
-    setSessionCreditsBurned(0)
-    lastDeductedMinuteRef.current = 0
-    sessionStartRef.current = Date.now()
-  }
-
-  const stopEngine = () => {
-    if (!engineActive) return
-    if (intervalRef.current) clearInterval(intervalRef.current)
-    const totalMinutes = Math.floor(elapsedSeconds / 60)
-    const oldLast = lastDeductedMinuteRef.current
-    for (let m = oldLast + 1; m <= totalMinutes; m++) {
-      const saved = sessionStartSavedMinutesRef.current + m
-      const rate = isWeekday() && saved > 60 ? 2 : 1
-      selectedIds.forEach((id) => spendPoints(id, rate, reason))
-      addGamingMinutesToday(1, mode, selectedIds)
+  const startBoth = () => {
+    const bothCanStart =
+      users.find((u) => u.id === 'roma')?.balance >= 1 && users.find((u) => u.id === 'kirill')?.balance >= 1
+    if (!bothCanStart) {
+      playError()
+      return
     }
-    setCurrentSessionMinutes(0)
-    setCurrentSessionInfo(null, [])
-    playCashRegister()
-    setEngineActive(false)
-    setEnginePaused(false)
-    setElapsedSeconds(0)
+    playEngineRev()
+    startEngineStore('roma', mode)
+    startEngineStore('kirill', mode)
+    startTimeRef.current.roma = Date.now()
+    startTimeRef.current.kirill = Date.now()
+    pausedElapsedRef.current = { roma: 0, kirill: 0 }
+    lastDeductedMinuteRef.current = { roma: 0, kirill: 0 }
     setSessionCreditsBurned(0)
-    lastDeductedMinuteRef.current = 0
   }
 
-  /** Timer: tick every second when running and not paused. */
+  const pauseAll = () => {
+    PILOT_IDS.forEach((id) => {
+      if (pilots?.[id]?.status !== 'RUNNING') return
+      const elapsed = (Date.now() - (startTimeRef.current[id] || Date.now())) / 1000 + (pausedElapsedRef.current[id] || 0)
+      pausedElapsedRef.current[id] = elapsed
+      pauseEngineStore(id)
+    })
+  }
+
+  const onStartRefs = (id) => {
+    startTimeRef.current[id] = Date.now()
+    pausedElapsedRef.current[id] = 0
+    lastDeductedMinuteRef.current[id] = 0
+  }
+
+  const onPause = (id) => {
+    const elapsed = (Date.now() - (startTimeRef.current[id] || Date.now())) / 1000 + (pausedElapsedRef.current[id] || 0)
+    pausedElapsedRef.current[id] = elapsed
+  }
+
+  const onResume = (id) => {
+    startTimeRef.current[id] = Date.now() - (pausedElapsedRef.current[id] || 0) * 1000
+  }
+
+  const onStop = (id) => {
+    startTimeRef.current[id] = 0
+    pausedElapsedRef.current[id] = 0
+    lastDeductedMinuteRef.current[id] = 0
+  }
+
+  /** Tick every 1000ms for UI timer; store session MINUTES (not seconds) so deduction runs once per minute. */
   useEffect(() => {
-    if (!engineActive || enginePaused) return
-    intervalRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
+    if (!anyRunning) return
+    intervalRef.current = setInterval(() => {
+      setTick((t) => t + 1)
+      PILOT_IDS.forEach((id) => {
+        if (pilots?.[id]?.status !== 'RUNNING') return
+        const start = startTimeRef.current[id] || Date.now()
+        const elapsedSeconds = (Date.now() - start) / 1000
+        const sessionMinutes = Math.floor(elapsedSeconds / 60)
+        setPilotSessionMinutes(id, sessionMinutes)
+      })
+    }, 1000)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [engineActive, enginePaused])
-
-  /** Обновляем currentSessionMinutes для «фитилька» в реальном времени. */
-  useEffect(() => {
-    if (!engineActive) {
-      setCurrentSessionMinutes(0)
-      return
-    }
-    setCurrentSessionMinutes(Math.floor(elapsedSeconds / 60))
-  }, [engineActive, elapsedSeconds, setCurrentSessionMinutes])
+  }, [anyRunning, setPilotSessionMinutes, pilots?.roma?.status, pilots?.kirill?.status])
 
   /**
-   * Per-minute deduction: будни — до 60 мин 1 кр/мин, после 60 мин 2 кр/мин; выходные — 1 кр/мин. Не списываем на паузе.
+   * Per-MINUTE deduction only: for each RUNNING pilot, deduct 1 XP (or 2 on weekday overdrive) per elapsed minute.
+   * Weekend (Sat/Sun): rate is ALWAYS 1x — overdrive explicitly disabled.
+   * Safety: if balance <= 0 at any point, force stop engine (no negative debt).
    */
   useEffect(() => {
-    if (!engineActive || enginePaused || selectedIds.length === 0) return
+    PILOT_IDS.forEach((id) => {
+      const p = pilots?.[id]
+      if (p?.status !== 'RUNNING') return
+      const currentMinute = p.sessionMinutes ?? 0
+      const oldLast = lastDeductedMinuteRef.current[id] ?? 0
+      if (currentMinute <= oldLast) return
 
-    const currentMinute = Math.floor(elapsedSeconds / 60)
-    const oldLast = lastDeductedMinuteRef.current
-    if (currentMinute <= oldLast) return
+      const state = useAppStore.getState()
+      const user = state.users.find((x) => x.id === id)
+      if (!user || user.balance < 1) {
+        playError()
+        stopEngineStore(id)
+        lastDeductedMinuteRef.current[id] = 0
+        return
+      }
 
-    const state = useAppStore.getState()
-    const pilotsWithBalance = selectedIds.filter((id) => {
-      const u = state.users.find((x) => x.id === id)
-      return u && u.balance >= 1
+      const reason = (p.mode === 'youtube' ? 'Ютуб / Мультики' : 'Игровое время')
+      const weekend = !isWeekday() // Sat/Sun: never overdrive, always 1 XP/min
+      let burned = 0
+      for (let m = oldLast + 1; m <= currentMinute; m++) {
+        const nowState = useAppStore.getState()
+        const pilotUser = nowState.users.find((x) => x.id === id)
+        if (!pilotUser || pilotUser.balance <= 0) {
+          playError()
+          stopEngineStore(id)
+          lastDeductedMinuteRef.current[id] = oldLast
+          return
+        }
+        const totalBeforeThisMinute = nowState.getGamingMinutesToday()
+        const rate = weekend ? 1 : totalBeforeThisMinute + 1 > 60 ? 2 : 1
+        spendPoints(id, rate, reason)
+        addGamingMinutesToday(1, p.mode ?? 'game', [id])
+        burned += rate
+      }
+      if (burned > 0) playBurnTick()
+      lastDeductedMinuteRef.current[id] = currentMinute
+      setSessionCreditsBurned((prev) => prev + burned)
     })
+  }, [pilots?.roma?.sessionMinutes, pilots?.roma?.status, pilots?.kirill?.sessionMinutes, pilots?.kirill?.status, spendPoints, addGamingMinutesToday, stopEngineStore])
 
-    if (pilotsWithBalance.length < selectedIds.length) {
-      playError()
-      if (intervalRef.current) clearInterval(intervalRef.current)
-      setCurrentSessionMinutes(0)
-      setCurrentSessionInfo(null, [])
-      setEngineActive(false)
-      setEnginePaused(false)
-      setElapsedSeconds(0)
-      setSessionCreditsBurned(0)
-      lastDeductedMinuteRef.current = 0
-      return
-    }
-
-    const saved = sessionStartSavedMinutesRef.current
-    const weekday = isWeekday()
-    let burned = 0
-    for (let m = oldLast + 1; m <= currentMinute; m++) {
-      const totalAfterThisMinute = saved + m
-      const rate = weekday && totalAfterThisMinute > 60 ? 2 : 1
-      selectedIds.forEach((id) => spendPoints(id, rate, reason))
-      addGamingMinutesToday(1, mode, selectedIds)
-      burned += rate * selectedIds.length
-    }
-    lastDeductedMinuteRef.current = currentMinute
-    setSessionCreditsBurned((prev) => prev + burned)
-  }, [engineActive, enginePaused, elapsedSeconds, selectedIds, reason, spendPoints, addGamingMinutesToday, setCurrentSessionMinutes, mode])
-
-  const fuelGaugePercent = Math.max(
-    0,
-    100 - (Math.floor(elapsedSeconds / 60) / FUEL_GAUGE_MAX_MIN) * 100
-  )
+  const bothCanStart =
+    users.find((u) => u.id === 'roma')?.balance >= 1 && users.find((u) => u.id === 'kirill')?.balance >= 1
 
   return (
     <div className="rounded-2xl border-[3px] border-slate-600 bg-slate-800/95 p-4 sm:p-5 shrink-0 flex flex-col gap-4 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
@@ -269,10 +313,9 @@ export function ControlCenter() {
         Двигатель сгорания
       </h3>
 
-      {/* 1. Mode Selector: GAME MODE (Blue) vs YOUTUBE/CARTOONS (Pink) */}
-      <div>
-        <p className="font-mono text-[10px] text-slate-500 mb-1.5 uppercase">Режим</p>
-        <div className="flex gap-2">
+      {/* Master controls: slim bar — режим + ЗАПУСТИТЬ ОБОИХ (зелёный) + ПАУЗА ВСЕМ (жёлтый) */}
+      <div className="flex flex-wrap items-center gap-2 py-2 border-b border-slate-600/60">
+        <div className="flex gap-1.5 shrink-0">
           {MODES.map((m) => {
             const Icon = m.Icon
             const isSelected = mode === m.id
@@ -281,179 +324,75 @@ export function ControlCenter() {
                 key={m.id}
                 type="button"
                 onClick={() => setMode(m.id)}
-                disabled={engineActive}
+                disabled={anyRunning}
                 className={cn(
-                  'flex-1 min-h-[52px] rounded-2xl border-[3px] font-gaming text-base font-bold uppercase transition touch-manipulation flex items-center justify-center gap-2 text-pop',
+                  'min-h-[40px] px-3 rounded-xl border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
                   m.color === 'blue' &&
-                    (isSelected
-                      ? 'border-blue-500 bg-blue-500/25 text-blue-300 shadow-[0_0_16px_rgba(59,130,246,0.4)]'
-                      : 'border-slate-600 text-slate-400 hover:border-slate-500 disabled:opacity-60'),
+                    (isSelected ? 'border-blue-500 bg-blue-500/25 text-blue-300' : 'border-slate-600 text-slate-400'),
                   m.color === 'pink' &&
-                    (isSelected
-                      ? 'border-pink-500 bg-pink-500/25 text-pink-300 shadow-[0_0_16px_rgba(236,72,153,0.4)]'
-                      : 'border-slate-600 text-slate-400 hover:border-slate-500 disabled:opacity-60')
+                    (isSelected ? 'border-pink-500 bg-pink-500/25 text-pink-300' : 'border-slate-600 text-slate-400')
                 )}
               >
-                <Icon className="h-5 w-5 shrink-0 icon-pop" strokeWidth={2.5} aria-hidden />
-                <span className="truncate">{m.label}</span>
+                <Icon className="h-4 w-4" strokeWidth={2.5} />
+                <span>{m.id === 'game' ? 'ИГРА' : 'ЮТУБ'}</span>
               </button>
             )
           })}
         </div>
-      </div>
-
-      {/* 2. Pilot Selector: Рома / Кирилл / Оба — активные с неоновым свечением */}
-      <div>
-        <p className="font-mono text-[10px] text-slate-500 mb-1.5 uppercase">
-          Пилот — нажми, чтобы включить или выключить
-        </p>
-        <div className="flex gap-2 flex-wrap">
-          {PILOT_IDS.map((id) => {
-            const label = id === 'roma' ? 'Рома' : 'Кирилл'
-            const isSelected = selectedIds.includes(id)
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setSelectedPilotIds((prev) => togglePilot(prev, id))}
-                disabled={engineActive}
-                className={cn(
-                  'flex-1 min-w-0 min-h-[44px] rounded-2xl border-[3px] font-gaming text-sm font-bold uppercase transition touch-manipulation text-pop',
-                  isSelected
-                    ? 'bg-cyan-500/35 text-cyan-200 border-cyan-400 shadow-[0_0_14px_rgba(34,211,238,0.6),0_0_28px_rgba(34,211,238,0.35)]'
-                    : 'border-slate-600 text-slate-400 hover:text-slate-300 hover:bg-slate-700/60 hover:border-slate-500 disabled:opacity-60'
-                )}
-              >
-                {label}
-              </button>
-            )
-          })}
-          <button
-            type="button"
-            onClick={() => setSelectedPilotIds((prev) => togglePilot(prev, 'both'))}
-            disabled={engineActive}
-            className={cn(
-              'flex-1 min-w-0 min-h-[44px] rounded-2xl border-[3px] font-gaming text-sm font-bold uppercase transition touch-manipulation text-pop',
-              selectedIds.length === 2
-                ? 'bg-cyan-500/35 text-cyan-200 border-cyan-400 shadow-[0_0_14px_rgba(34,211,238,0.6),0_0_28px_rgba(34,211,238,0.35)]'
-                : 'border-slate-600 text-slate-400 hover:text-slate-300 hover:bg-slate-700/60 hover:border-slate-500 disabled:opacity-60'
-            )}
-          >
-            Оба
-          </button>
-        </div>
-      </div>
-
-      {/* 3. Engine: Idle = green START; Running = yellow PAUSE + red STOP, RPM ring */}
-      <div className="flex flex-col gap-3">
-        {!engineActive && (
+        <div className="flex gap-2 flex-1 min-w-0 justify-end">
           <motion.button
             type="button"
-            onClick={startEngine}
-            disabled={!canStart}
+            onClick={startBoth}
+            disabled={!bothCanStart}
             className={cn(
-              'w-full font-gaming font-black uppercase tracking-widest py-6 sm:py-7 text-xl sm:text-2xl rounded-3xl border-[4px] transition touch-manipulation text-pop shadow-[0_6px_0_rgba(0,0,0,0.3)]',
-              canStart
-                ? 'border-emerald-500/80 bg-emerald-500/20 text-emerald-200 shadow-[0_0_20px_rgba(52,211,153,0.3)] hover:bg-emerald-500/30'
-                : 'border-slate-700 bg-slate-800/60 text-slate-500 cursor-not-allowed'
+              'min-h-[40px] px-3 sm:px-4 rounded-xl border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation',
+              bothCanStart
+                ? 'border-emerald-500/80 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+                : 'border-slate-600 text-slate-500 opacity-60 cursor-not-allowed'
             )}
-            whileHover={canStart ? { scale: 1.02 } : undefined}
-            whileTap={canStart ? { scale: 0.98 } : undefined}
           >
-            ▶ ЗАПУСК ДВИГАТЕЛЯ
+            ▶ ЗАПУСТИТЬ ОБОИХ
           </motion.button>
-        )}
-
-        {engineActive && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="relative flex flex-col gap-3"
+          <motion.button
+            type="button"
+            onClick={pauseAll}
+            disabled={!anyRunning}
+            className={cn(
+              'min-h-[40px] px-3 sm:px-4 rounded-xl border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation',
+              anyRunning
+                ? 'border-amber-500/80 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
+                : 'border-slate-600 text-slate-500 opacity-60 cursor-not-allowed'
+            )}
           >
-            {/* Pulsing RPM ring around main control */}
-            <div className="relative flex justify-center items-center">
-              <motion.div
-                className="absolute inset-0 rounded-3xl border-[3px] border-amber-400/60 pointer-events-none"
-                style={{ padding: 4 }}
-                animate={{
-                  boxShadow: [
-                    '0 0 12px rgba(251,191,36,0.4), inset 0 0 12px rgba(251,191,36,0.1)',
-                    '0 0 24px rgba(251,191,36,0.7), inset 0 0 20px rgba(251,191,36,0.2)',
-                    '0 0 12px rgba(251,191,36,0.4), inset 0 0 12px rgba(251,191,36,0.1)',
-                  ],
-                }}
-                transition={{ duration: 1.2, repeat: Infinity }}
-              />
-              <motion.div
-                className="absolute w-full h-full rounded-3xl border-2 border-amber-400/40 pointer-events-none"
-                style={{ borderStyle: 'dashed' }}
-                animate={{ rotate: 360 }}
-                transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-              />
-              <div className="relative w-full flex flex-col gap-2">
-                <motion.button
-                  type="button"
-                  onClick={() => setEnginePaused((p) => !p)}
-                  className={cn(
-                    'w-full font-gaming font-black uppercase tracking-widest py-5 sm:py-6 text-lg sm:text-xl rounded-3xl border-[4px] transition touch-manipulation text-pop',
-                    'border-amber-500/90 bg-amber-500/25 text-amber-100 shadow-[0_0_20px_rgba(251,191,36,0.4)] hover:bg-amber-500/35'
-                  )}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  {enginePaused ? '▶ ПРОДОЛЖИТЬ' : '⏸ ПАУЗА'}
-                </motion.button>
-                <motion.button
-                  type="button"
-                  onClick={stopEngine}
-                  className="w-full font-gaming font-bold uppercase tracking-wider py-3 sm:py-3.5 text-sm sm:text-base rounded-2xl border-[3px] border-red-500/90 bg-red-500/20 text-red-200 shadow-[0_0_12px_rgba(239,68,68,0.35)] hover:bg-red-500/30 transition touch-manipulation text-pop"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  ⏹ СТОП
-                </motion.button>
-              </div>
-            </div>
-
-            {/* Time + Fuel + Burned */}
-            <div className="rounded-2xl border-[3px] border-orange-500/50 bg-slate-800/95 p-4 sm:p-5 space-y-4 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
-              <div>
-                <p className="font-mono text-[10px] text-slate-500 uppercase tracking-wider mb-1">Время</p>
-                <div className="font-gaming text-2xl sm:text-3xl font-black tabular-nums rounded-2xl border-[3px] border-orange-500/50 bg-slate-800/95 px-4 py-3 text-center text-orange-100 text-pop">
-                  {formatElapsed(elapsedSeconds)}
-                </div>
-              </div>
-              <div>
-                <p className="font-mono text-[10px] text-slate-500 uppercase tracking-wider mb-1">Топливо</p>
-                <div className="h-2.5 rounded-full bg-slate-800 border border-slate-600 overflow-hidden">
-                  <motion.div
-                    className="h-full rounded-full bg-gradient-to-r from-orange-500 via-red-500 to-red-600"
-                    animate={{ width: `${fuelGaugePercent}%` }}
-                    transition={{ duration: 0.4 }}
-                  />
-                </div>
-              </div>
-              <div className="rounded-xl border-[2px] border-red-500/50 bg-slate-800/90 px-3 py-2">
-                <p className="font-mono text-[10px] text-slate-500 uppercase mb-0.5">Сожжено</p>
-                <p className="font-lcd text-lg font-bold tabular-nums text-red-400">−{sessionCreditsBurned} кр</p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {!engineActive && selectedIds.length === 0 && (
-          <p className="font-mono text-amber-400 text-xs uppercase text-center">
-            Выберите пилота (Рома / Кирилл / Оба)
-          </p>
-        )}
-        {!canStart && !engineActive && selectedIds.length > 0 && (
-          <p className="font-mono text-red-400 text-xs uppercase text-center">
-            Недостаточно кредитов (1 кр = 1 мин)
-          </p>
-        )}
+            ⏸ ПАУЗА ВСЕМ
+          </motion.button>
+        </div>
       </div>
 
-      {/* 4. Daily Flight Log — всегда виден, обновляется в реальном времени */}
+      {/* Dual cockpit: two pilot cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 min-h-0">
+        <PilotEngine
+          id="roma"
+          elapsedSeconds={romaElapsedSeconds}
+          mode={mode}
+          onStartRefs={onStartRefs}
+          onPause={onPause}
+          onResume={onResume}
+          onStop={onStop}
+        />
+        <PilotEngine
+          id="kirill"
+          elapsedSeconds={kirillElapsedSeconds}
+          mode={mode}
+          onStartRefs={onStartRefs}
+          onPause={onPause}
+          onResume={onResume}
+          onStop={onStop}
+        />
+      </div>
+
+      {/* Reactor Core + Daily Stats below cards */}
+      <ReactorCore />
       <DailyFlightLog />
     </div>
   )

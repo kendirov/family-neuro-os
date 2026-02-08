@@ -83,6 +83,117 @@
   .clock-glow {
     text-shadow: 0 0 12px rgba(34, 211, 238, 0.8), 0 0 24px rgba(34, 211, 238, 0.5);
   }
+
+  /* Mission Timeline: glass bar + active day glow (sci‑fi HUD) — legacy */
+  .timeline-glass-bar {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.92) 100%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(100, 116, 139, 0.4);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 4px 20px rgba(0, 0, 0, 0.4);
+  }
+  .timeline-day-active {
+    box-shadow:
+      0 0 0 2px rgba(34, 211, 238, 0.6),
+      0 0 16px rgba(34, 211, 238, 0.4);
+    background: rgba(34, 211, 238, 0.12);
+    border-radius: 6px;
+  }
+  .timeline-day-weekend {
+    color: #a3e635;
+    text-shadow: 0 0 10px rgba(163, 230, 53, 0.5);
+  }
+
+  /* Chrono-Stream: Timeline Rail (video-editor / sci-fi HUD) */
+  .chrono-stream-glass {
+    background: linear-gradient(160deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(100, 116, 139, 0.35);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 4px 24px rgba(0, 0, 0, 0.35);
+  }
+  /* Time Axis: horizontal line — weekday grey, last 2/7 weekend gold/green */
+  .chrono-stream-axis {
+    background: linear-gradient(
+      to right,
+      rgba(100, 116, 139, 0.6) 0%,
+      rgba(100, 116, 139, 0.6) 71.42%,
+      rgba(163, 230, 53, 0.5) 71.42%,
+      rgba(251, 191, 36, 0.55) 100%
+    );
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.15);
+  }
+  .chrono-node-cell {
+    padding-top: 0.5rem;
+  }
+  .chrono-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .chrono-node-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(100, 116, 139, 0.7);
+    flex-shrink: 0;
+  }
+  .chrono-node-label {
+    color: rgba(148, 163, 184, 0.85);
+  }
+  .chrono-node-past .chrono-node-dot,
+  .chrono-node-past .chrono-node-label {
+    opacity: 0.45;
+    color: rgb(100, 116, 139);
+  }
+  .chrono-node-past .chrono-node-dot {
+    background: rgba(71, 85, 105, 0.8);
+  }
+  .chrono-node-future .chrono-node-dot {
+    background: transparent;
+    border: 1.5px solid rgba(148, 163, 184, 0.4);
+    width: 8px;
+    height: 8px;
+  }
+  .chrono-node-future .chrono-node-label {
+    color: rgba(148, 163, 184, 0.6);
+  }
+  .chrono-node-weekend .chrono-node-label {
+    color: rgba(163, 230, 53, 0.7);
+  }
+  .chrono-node-active {
+    position: relative;
+  }
+  .chrono-node-active .chrono-node-dot {
+    width: 12px;
+    height: 12px;
+    background: rgba(34, 211, 238, 0.95);
+    box-shadow:
+      0 0 12px rgba(34, 211, 238, 0.9),
+      0 0 24px rgba(34, 211, 238, 0.5);
+  }
+  .chrono-node-active .chrono-node-label {
+    color: rgb(34, 211, 238);
+    text-shadow: 0 0 12px rgba(34, 211, 238, 0.8), 0 0 24px rgba(34, 211, 238, 0.4);
+  }
+  .chrono-node-bracket {
+    position: absolute;
+    inset: -6px -8px -6px -8px;
+    border: 2px solid rgba(34, 211, 238, 0.7);
+    border-radius: 8px;
+    box-shadow:
+      0 0 16px rgba(34, 211, 238, 0.35),
+      inset 0 0 16px rgba(34, 211, 238, 0.08);
+    pointer-events: none;
+  }
+  .chrono-datetime {
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.7), 0 0 20px rgba(34, 211, 238, 0.35);
+  }
 }
 
 @layer utilities {
@@ -288,6 +399,63 @@
   }
   .animate-burn-pulse {
     animation: burn-pulse 1.2s ease-in-out infinite;
+  }
+
+  /* Reactor Core: heat gauge bar — smooth color transition */
+  .reactor-core-bar {
+    transition: width 0.5s ease-out, background 0.4s ease;
+  }
+  @keyframes reactor-overheat-pulse {
+    0%, 100% {
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.6), inset 0 0 8px rgba(239, 68, 68, 0.2);
+      filter: brightness(1.05);
+    }
+    50% {
+      box-shadow: 0 0 24px rgba(239, 68, 68, 0.9), inset 0 0 12px rgba(239, 68, 68, 0.35);
+      filter: brightness(1.2);
+    }
+  }
+  .reactor-core-overheat {
+    animation: reactor-overheat-pulse 1s ease-in-out infinite;
+  }
+
+  /* Plasma Core (PilotEngine): stage animations */
+  @keyframes plasma-liquid {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+  .plasma-core-liquid {
+    animation: plasma-liquid 4s linear infinite;
+    box-shadow: 0 0 12px rgba(34, 211, 238, 0.4), inset 0 0 8px rgba(52, 211, 153, 0.2);
+  }
+
+  @keyframes plasma-pulse {
+    0%, 100% {
+      box-shadow: 0 0 14px rgba(168, 85, 247, 0.5), 0 0 24px rgba(236, 72, 153, 0.4);
+      filter: brightness(1);
+    }
+    50% {
+      box-shadow: 0 0 24px rgba(168, 85, 247, 0.8), 0 0 36px rgba(236, 72, 153, 0.6);
+      filter: brightness(1.15);
+    }
+  }
+  .plasma-core-plasma {
+    animation: plasma-pulse 0.8s ease-in-out infinite, plasma-liquid 2s linear infinite;
+  }
+
+  @keyframes plasma-shimmer {
+    0% { background-position: 0% 50%; filter: brightness(1); }
+    50% { filter: brightness(1.2); }
+    100% { background-position: 200% 50%; filter: brightness(1); }
+  }
+  .plasma-core-shimmer {
+    animation: plasma-shimmer 2.5s ease-in-out infinite;
+    box-shadow: 0 0 16px rgba(251, 191, 36, 0.5), inset 0 0 10px rgba(250, 204, 21, 0.25);
+  }
+
+  /* Burn Cycle: ring around Play/Pause fills over 60s, then resets when XP drops */
+  .burn-cycle-progress {
+    filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.4));
   }
 
   /* LCD Digital display (HUD numbers) */

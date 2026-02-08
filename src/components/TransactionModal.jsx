@@ -121,7 +121,7 @@ export function TransactionModal({ user, transactions = [], onClose, onShowToast
               >
                 {display === '' ? '0' : display}
               </span>
-              <span className="font-gaming text-slate-400 text-base ml-1 font-bold">кр</span>
+              <span className="font-gaming text-slate-400 text-base ml-1 font-bold">⚡ XP</span>
             </div>
 
             {/* Quick presets */}

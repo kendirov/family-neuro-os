@@ -13,13 +13,30 @@ function profileToUser(row) {
   }
 }
 
+const LAST_ACTIVE_KEY = 'family_lastActiveDate'
+const DAILY_BASE_KEY = 'family_dailyBase'
+
 function App() {
   const fetchState = useAppStore((s) => s.fetchState)
   const setUsers = useAppStore((s) => s.setUsers)
+  const checkDailyReset = useAppStore((s) => s.checkDailyReset)
 
   useEffect(() => {
     fetchState()
   }, [fetchState])
+
+  useEffect(() => {
+    checkDailyReset()
+  }, [checkDailyReset])
+
+  useEffect(() => {
+    return useAppStore.subscribe((state) => {
+      if (typeof localStorage === 'undefined') return
+      const today = new Date().toISOString().slice(0, 10)
+      if (state.lastActiveDate === today && state.dailyBase)
+        localStorage.setItem(DAILY_BASE_KEY, JSON.stringify(state.dailyBase))
+    })
+  }, [])
 
   useEffect(() => {
     const channel = supabase

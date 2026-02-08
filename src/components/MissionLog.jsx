@@ -1,26 +1,17 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, Sun, UtensilsCrossed, Briefcase } from 'lucide-react'
+import { ChevronDown, Sun, UtensilsCrossed, Briefcase, BookOpen, Home } from 'lucide-react'
 import { TaskCard } from '@/components/TaskCard'
 import { CompositeTaskCard } from '@/components/CompositeTaskCard'
 import { cn } from '@/lib/utils'
 
+/** Order and config for 4 chronological phases. */
+const CATEGORY_ORDER = ['Morning', 'School', 'Food', 'Base']
 const CATEGORY_CONFIG = {
-  Morning: {
-    label: 'Утро',
-    icon: Sun,
-    key: 'morning',
-  },
-  Food: {
-    label: 'Питание',
-    icon: UtensilsCrossed,
-    key: 'food',
-  },
-  Deeds: {
-    label: 'Дело',
-    icon: Briefcase,
-    key: 'deeds',
-  },
+  Morning: { label: 'Утро', icon: Sun, key: 'morning' },
+  School: { label: 'Школа', icon: BookOpen, key: 'school' },
+  Food: { label: 'Питание', icon: UtensilsCrossed, key: 'food' },
+  Base: { label: 'Дом и сон', icon: Home, key: 'base' },
 }
 
 /**
@@ -47,7 +38,9 @@ export function MissionLog({
         Ежедневные миссии
       </h3>
 
-      {Object.entries(CATEGORY_CONFIG).map(([category, config]) => {
+      {CATEGORY_ORDER.map((category) => {
+        const config = CATEGORY_CONFIG[category]
+        if (!config) return null
         const tasks = tasksByCategory[category] ?? []
         const foodComposite = tasksByCategory.foodComposite ?? []
         const isFood = category === 'Food'

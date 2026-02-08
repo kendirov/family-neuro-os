@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
 import {
   Candy,
   Banknote,
@@ -14,111 +13,19 @@ import { Toast } from '@/components/Toast'
 import { BlueRacerHelmet, PurplePilotHelmet } from '@/components/HelmetAvatar'
 import { useAppStore } from '@/stores/useAppStore'
 import { MARKET_ITEMS } from '@/data/marketItems'
+import { getMissionTasksByCategory, PENALTY_BOX } from '@/data/taskConfig'
 import { playCoin, playAlarm, playStart, playError, playChime } from '@/lib/sounds'
 import { cn } from '@/lib/utils'
 import { ControlCenter } from '@/components/ControlCenter'
 import { CountUpNumber } from '@/components/CountUpNumber'
-import { MissionLog } from '@/components/MissionLog'
+import { SupplyDepotSchedule } from '@/components/SupplyDepotSchedule'
 import { TransactionModal } from '@/components/TransactionModal'
 import { WeekProgressBar } from '@/components/WeekProgressBar'
 import { TodayStats } from '@/components/TodayStats'
 import { motion } from 'framer-motion'
 import { Wallet } from 'lucide-react'
 
-/** Module A: УТРО — Morning routine. Daily (disable after click until reset). */
-const MODULE_UTRO = [
-  { id: 'teeth', emoji: '🦷', label: 'Зубы', credits: 20, reason: 'Утро: Зубы' },
-  { id: 'bed', emoji: '🛌', label: 'Постель', credits: 10, reason: 'Утро: Постель' },
-]
-
-/** Module B: ПИТАНИЕ — Nutrition. Each row: main (big, daily) + modifier (small, circular). */
-const MODULE_PITANIE = [
-  {
-    main: { id: 'breakfast', emoji: '🍳', label: 'Завтрак', credits: 15, reason: 'Питание: Завтрак' },
-    modifiers: [
-      { id: 'breakfast_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Завтрак: Вовремя' },
-      { id: 'breakfast_many', emoji: '💪', label: 'Много', credits: 10, reason: 'Завтрак: Много' },
-    ],
-  },
-  {
-    main: { id: 'lunch', emoji: '🍔', label: 'Обед', credits: 20, reason: 'Питание: Обед' },
-    modifiers: [
-      { id: 'lunch_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Обед: Вовремя' },
-      { id: 'lunch_many', emoji: '💪', label: 'Много', credits: 10, reason: 'Обед: Много' },
-    ],
-  },
-  {
-    main: { id: 'dinner', emoji: '🍲', label: 'Ужин', credits: 15, reason: 'Питание: Ужин' },
-    modifiers: [
-      { id: 'dinner_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Ужин: Вовремя' },
-      { id: 'dinner_many', emoji: '💪', label: 'Много', credits: 10, reason: 'Ужин: Много' },
-    ],
-  },
-]
-
-/** Module C: ДЕЛО — Mission. School = royal blue when juicy. */
-const MODULE_DELO = [
-  { id: 'school', emoji: '🏫', label: 'Школа', credits: 30, reason: 'Дело: Школа', style: 'royal' },
-  { id: 'sport', emoji: '🏆', label: 'Секция', credits: 100, reason: 'Дело: Секция', style: 'gold', big: true },
-  { id: 'grade_5', emoji: '📚', label: 'Уроки (5)', credits: 50, reason: 'Дело: Уроки 5', style: 'royal' },
-  { id: 'grade_4', emoji: '📘', label: 'Уроки (4)', credits: 20, reason: 'Дело: Уроки 4', style: 'royal' },
-  { id: 'help_mom', emoji: '🧹', label: 'Помощь маме', credits: 30, reason: 'Дело: Помощь маме', style: 'green' },
-]
-
-/** Module D: ШТРАФНОЙ БОКС — Danger zone. Small, distinct, hazard style. */
-const MODULE_PENALTY = [
-  { id: 'shout', emoji: '🗣', label: 'Крик/Спор', credits: -20, reason: 'Штраф: Крик/Спор' },
-  { id: 'slow', emoji: '🐢', label: 'Медленно', credits: -10, reason: 'Штраф: Медленно' },
-  { id: 'rude', emoji: '🤬', label: 'Грубость', credits: -50, reason: 'Штраф: Грубость' },
-  { id: 'fight', emoji: '🥊', label: 'Драка', credits: -100, reason: 'Штраф: Драка' },
-]
-
-/** Normalized mission tasks: id, label, reward, category, reason, emoji, isDaily (for status). */
-function getMissionTasksByCategory() {
-  const morning = MODULE_UTRO.map((a) => ({
-    id: a.id,
-    label: a.label,
-    reward: a.credits,
-    category: 'Morning',
-    reason: a.reason,
-    emoji: a.emoji,
-    isDaily: true,
-    credits: a.credits,
-  }))
-  const deeds = MODULE_DELO.map((a) => ({
-    id: a.id,
-    label: a.label,
-    reward: a.credits,
-    category: 'Deeds',
-    reason: a.reason,
-    emoji: a.emoji,
-    isDaily: false,
-    credits: a.credits,
-  }))
-  /** Food as composite groups: main + modifiers (for CompositeTaskCard). Flat list no longer used for Nutrition. */
-  const foodComposite = MODULE_PITANIE.map((row) => ({
-    main: {
-      id: row.main.id,
-      label: row.main.label,
-      reward: row.main.credits,
-      credits: row.main.credits,
-      reason: row.main.reason,
-      emoji: row.main.emoji,
-      isDaily: true,
-    },
-    modifiers: row.modifiers.map((m) => ({
-      id: m.id,
-      label: m.label,
-      reward: m.credits,
-      credits: m.credits,
-      reason: m.reason,
-      emoji: m.emoji,
-      isDaily: true,
-    })),
-  }))
-  return { Morning: morning, Food: [], Deeds: deeds, foodComposite }
-}
-
+/** Mission tasks from centralized task config (4 phases: Утро, Школа, Питание, Дом и сон). */
 const MISSION_TASKS_BY_CATEGORY = getMissionTasksByCategory()
 
 const USER_THEMES = {
@@ -189,7 +96,7 @@ function GodModeCommandBar({ roma, kirill, onShowToast, disabled }) {
         <input
           type="text"
           inputMode="numeric"
-          placeholder="±кр"
+          placeholder="±XP"
           value={input}
           onChange={(e) => setInput(e.target.value.replace(/[^\d\-]/g, ''))}
           onKeyDown={(e) => e.key === 'Enter' && handleApply()}
@@ -243,6 +150,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
   const spendPoints = useAppStore((s) => s.spendPoints)
   const isDailyBaseComplete = useAppStore((s) => s.isDailyBaseComplete)
   const markDailyBaseComplete = useAppStore((s) => s.markDailyBaseComplete)
+  const undoDailyTask = useAppStore((s) => s.undoDailyTask)
   const theme = USER_THEMES[user.color] || USER_THEMES.cyan
   const [floatEarn, setFloatEarn] = useState(null)
   const [avatarShake, setAvatarShake] = useState(false)
@@ -299,13 +207,19 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
   const handleMissionClick = (action, e) => applyDelta(action, false, e)
   const handlePenaltyClick = (action, e) => applyDelta(action, false, e)
 
-  /** Mission Log: complete task with chime and floating +N toward score. Main (Съел) and modifiers (Вовремя/Много) both go through here. */
+  /** Mission Log: complete task with chime and floating +N toward score. Supports penalty tasks (negative credits). */
   const handleMissionTaskComplete = (task, e) => {
     if (task.isDaily && isDailyBaseComplete(user.id, task.id)) return
     const credits = task.credits ?? task.reward ?? 0
     const action = { id: task.id, credits, reason: task.reason ?? task.label, label: task.label ?? task.id }
-    if (typeof credits !== 'number' || credits <= 0) return
+    if (typeof credits !== 'number') return
     applyDelta(action, task.isDaily !== false, e, { soundOverride: 'chime', floatFromCard: true })
+  }
+
+  /** Inline undo for daily tasks: remove last matching transaction and clear daily state; show toast. */
+  const handleUndoDailyTask = (userId, task) => {
+    undoDailyTask(userId, task.id, task.reason ?? task.label)
+    onShowToast?.({ message: 'Действие отменено', variant: 'success' })
   }
 
   useEffect(() => {
@@ -392,30 +306,32 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
                 <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">Баланс</span>
                 <span className="hud-score-total flex items-baseline justify-center gap-0.5">
                   <CountUpNumber value={user.balance} duration={400} />
-                  <span className="font-sans-data text-sm text-amber-400/90">кр</span>
+                  <span className="font-sans-data text-sm text-amber-400/90">⚡ XP</span>
                 </span>
               </div>
               <div className="h-px w-full bg-slate-600/60 rounded-full" aria-hidden />
               <div className="flex flex-col items-center">
                 <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">За сегодня</span>
                 <span className="hud-score-earned">+{todayEarned}</span>
-                <span className="font-sans-data text-[10px] text-slate-500">кр</span>
+                <span className="font-sans-data text-[10px] text-slate-500">⚡ XP</span>
               </div>
             </div>
           </div>
         )
       })()}
 
-      {/* Mission Log: daily missions by category (Morning, Nutrition, Deeds) */}
+      {/* Chronological Supply Depot: 4 blocks (Morning, School, Food, Home) — scrollable */}
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
-        <MissionLog
-          tasksByCategory={MISSION_TASKS_BY_CATEGORY}
+        <SupplyDepotSchedule
           accentColor={user.color === 'cyan' ? 'cyan' : 'purple'}
+          userId={user.id}
+          onUndoDailyTask={handleUndoDailyTask}
           getStatus={(taskId) => {
             const isDaily =
-              MISSION_TASKS_BY_CATEGORY.Morning.some((t) => t.id === taskId) ||
+              (MISSION_TASKS_BY_CATEGORY.Morning ?? []).some((t) => t.id === taskId) ||
+              (MISSION_TASKS_BY_CATEGORY.Base ?? []).some((t) => t.id === taskId) ||
               (MISSION_TASKS_BY_CATEGORY.foodComposite ?? []).some(
-                (g) => g.main.id === taskId || g.modifiers.some((m) => m.id === taskId)
+                (g) => g.main.id === taskId || (g.modifiers ?? []).some((m) => m.id === taskId)
               )
             if (!isDaily) return 'pending'
             return isDailyBaseComplete(user.id, taskId) ? 'completed' : 'pending'
@@ -432,7 +348,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         </h3>
         <div className="danger-zone rounded-2xl p-3 space-y-2">
           <div className="grid grid-cols-2 gap-1">
-            {MODULE_PENALTY.map((action) => (
+            {PENALTY_BOX.map((action) => (
               <button
                 key={action.id}
                 type="button"
@@ -581,7 +497,7 @@ function MarketCard({ item, onClick }) {
         {nameRu}
       </span>
       <span className="font-mono text-xs tabular-nums text-alert/90 border border-slate-600 rounded px-1.5 py-0.5 bg-slate-800/80">
-        −{item.cost} кр
+        −{item.cost} ⚡ XP
       </span>
     </button>
   )
@@ -713,7 +629,7 @@ function MarketplaceSection() {
             )}
           >
             <p className="font-mono text-center text-alert text-lg font-semibold uppercase">
-              Недостаточно кредитов
+              Недостаточно XP
             </p>
             <button
               type="button"
@@ -902,15 +818,17 @@ export function Dashboard({ mode = 'pilot' }) {
   const isPilot = mode === 'pilot'
   const isCommander = mode === 'commander'
 
-  /** Right Panel glow: engine running = blue pulse; Overdrive (будни > 60 мин) = red alarm. Select only primitives/raw refs to avoid infinite re-renders. */
-  const engineRunning = useAppStore((s) => s.currentSessionMode != null)
-  const currentSessionMinutes = useAppStore((s) => s.currentSessionMinutes)
+  /** Right Panel glow: engine running = blue pulse; Overdrive (будни > 60 мин) = red alarm. */
+  const engineRunning = useAppStore((s) => s.pilots?.roma?.status === 'RUNNING' || s.pilots?.kirill?.status === 'RUNNING')
+  const pilots = useAppStore((s) => s.pilots)
   const gamingToday = useAppStore((s) => s.gamingToday)
   const displayMinutesToday = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10)
     const fromToday = gamingToday?.dateKey === today ? (gamingToday?.minutes ?? 0) : 0
-    return fromToday + (currentSessionMinutes ?? 0)
-  }, [currentSessionMinutes, gamingToday])
+    const roma = pilots?.roma?.sessionMinutes ?? 0
+    const kirill = pilots?.kirill?.sessionMinutes ?? 0
+    return fromToday + roma + kirill
+  }, [gamingToday, pilots])
   const isWeekday = new Date().getDay() >= 1 && new Date().getDay() <= 5
   const overdrive = isWeekday && displayMinutesToday > 60
 
@@ -919,30 +837,16 @@ export function Dashboard({ mode = 'pilot' }) {
     setToast({ message: 'ОПЕРАЦИЯ ОТМЕНЕНА', variant: 'success' })
   }
 
+  const simulateDayReset = useAppStore((s) => s.simulateDayReset)
+  const handleSimulateDayReset = () => {
+    simulateDayReset()
+    setToast({ message: 'Сброс дня выполнен. Все ежедневные задачи снова активны.', variant: 'success' })
+  }
+
   return (
     <KioskLayout>
       <Header />
       <WeekProgressBar />
-      {/* Role label + ссылка в админку (чтобы открывать без 404: сначала главная, потом клик) */}
-      <div className="shrink-0 px-4 pt-2 pb-0 flex flex-col items-center gap-2">
-        {isPilot ? (
-          <>
-            <p className="font-mono text-sm text-slate-400 tracking-wider text-center">
-              РЕЖИМ ПИЛОТА (ТОЛЬКО ПРОСМОТР)
-            </p>
-            <Link
-              to="/admin"
-              className="font-gaming text-sm font-bold uppercase tracking-wider px-5 py-2.5 rounded-2xl border-2 border-amber-500/60 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 hover:border-amber-500/80 transition shadow-[0_0_12px_rgba(251,191,36,0.2)]"
-            >
-              🔓 Открыть панель админа
-            </Link>
-          </>
-        ) : (
-          <p className="font-mono text-sm font-bold text-red-500 tracking-wider text-center">
-            РЕЖИМ КОМАНДИРА
-          </p>
-        )}
-      </div>
       <main className="dashboard-grid flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden gap-4 p-4">
         {/* LEFT PANEL — Pilots */}
         <section className="dashboard-left flex flex-col min-h-0 lg:min-h-0 panel-glass rounded-2xl p-5 relative">
@@ -950,7 +854,20 @@ export function Dashboard({ mode = 'pilot' }) {
           <span className="panel-bolt bolt-tr" aria-hidden />
           <span className="panel-bolt bolt-bl" aria-hidden />
           <span className="panel-bolt bolt-br" aria-hidden />
-          <h2 className="font-gaming text-base text-slate-400 mb-3 shrink-0 uppercase tracking-wider">Пилоты</h2>
+          <div className="flex items-center justify-between gap-2 mb-3 shrink-0">
+            <h2 className="font-gaming text-base text-slate-400 uppercase tracking-wider">Пилоты</h2>
+            {isCommander && (
+              <button
+                type="button"
+                onClick={handleSimulateDayReset}
+                className="font-mono text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-lg border-2 border-amber-500/70 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 transition touch-manipulation"
+                aria-label="Сброс дня (тест)"
+                title="Сбросить ежедневные задачи для теста"
+              >
+                СБРОС ДНЯ
+              </button>
+            )}
+          </div>
           {isCommander && (
             <GodModeCommandBar
               roma={roma}

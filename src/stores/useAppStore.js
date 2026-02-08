@@ -8,6 +8,21 @@ function getDateKey() {
   return new Date().toISOString().slice(0, 10)
 }
 
+/** Пн–Пт = будни. Сб/Вс = выходной: overdrive ВЫКЛ, всегда 1 XP/мин. */
+function isWeekday() {
+  const d = new Date().getDay()
+  return d >= 1 && d <= 5
+}
+
+const PILOT_IDS = ['roma', 'kirill']
+
+const initialPilotState = () => ({
+  status: 'IDLE',
+  sessionMinutes: 0,
+  burnerActive: false,
+  mode: null,
+})
+
 /** Map DB profile row to store user shape. */
 function profileToUser(row) {
   return {
@@ -60,6 +75,75 @@ export const useAppStore = create((set, get) => ({
       return { dailyBase: {} }
     }),
 
+  /** Clear a single daily completion so the task shows pending again (e.g. after undo). */
+  clearDailyComplete: (userId, actionId) =>
+    set((state) => {
+      const userDaily = state.dailyBase[userId]
+      if (!userDaily || userDaily[actionId] == null) return state
+      const { [actionId]: _, ...rest } = userDaily
+      return {
+        dailyBase: { ...state.dailyBase, [userId]: Object.keys(rest).length ? rest : {} },
+      }
+    }),
+
+  /**
+   * Undo last completion of a daily task: find latest transaction for user with matching description,
+   * remove it (refund/uncharge), clear daily state for that action.
+   */
+  undoDailyTask: (userId, actionId, reason) => {
+    const state = get()
+    const tx = [...(state.transactions ?? [])]
+      .filter((t) => t.userId === userId && t.description === reason && t.amount > 0)
+      .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0]
+    if (tx) get().removeTransaction(tx.id)
+    get().clearDailyComplete(userId, actionId)
+  },
+
+  /** Last calendar date the app was active (YYYY-MM-DD). Used for daily reset on new day. */
+  lastActiveDate: null,
+
+  /**
+   * Call on app load: if current date !== lastActiveDate, reset daily task states and set lastActiveDate to today.
+   * Persist lastActiveDate (and dailyBase for same-day) to localStorage so reset works across refresh.
+   */
+  checkDailyReset: () => {
+    const today = getDateKey()
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('family_lastActiveDate') : null
+    if (stored !== today) {
+      set({ dailyBase: {}, lastActiveDate: today })
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('family_lastActiveDate', today)
+        localStorage.removeItem('family_dailyBase')
+      }
+    } else {
+      set({ lastActiveDate: today })
+      if (typeof localStorage !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('family_dailyBase')
+          if (raw) {
+            const parsed = JSON.parse(raw)
+            if (parsed && typeof parsed === 'object') set((s) => ({ dailyBase: parsed }))
+          }
+        } catch (_) {}
+      }
+    }
+  },
+
+  /**
+   * Manual "simulate new day" for testing: set lastActiveDate to yesterday so next checkDailyReset clears daily state.
+   * Call after setting localStorage so that the next checkDailyReset() run (or page refresh) sees a new day.
+   */
+  simulateDayReset: () => {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    const yesterday = d.toISOString().slice(0, 10)
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('family_lastActiveDate', yesterday)
+      localStorage.removeItem('family_dailyBase')
+    }
+    get().checkDailyReset()
+  },
+
   panelLocked: true,
   setPanelLocked: (value) => set({ panelLocked: value }),
 
@@ -100,23 +184,110 @@ export const useAppStore = create((set, get) => ({
     return state.gamingToday?.dateKey === today ? (state.gamingToday?.minutes ?? 0) : 0
   },
 
-  /** Текущая сессия (минуты) — обновляется каждую минуту пока двигатель работает. Для «фитилька» в реальном времени. */
-  currentSessionMinutes: 0,
-  setCurrentSessionMinutes: (n) => set({ currentSessionMinutes: Math.max(0, n) }),
+  /** Dual-core engine: независимые таймеры по пилотам. */
+  pilots: (() => {
+    const o = {}
+    PILOT_IDS.forEach((id) => { o[id] = initialPilotState() })
+    return o
+  })(),
 
-  /** Минуты за сегодня для отображения: сохранённые + текущая сессия. */
-  getDisplayMinutesToday: () => {
+  setPilotSessionMinutes: (pilotId, minutes) =>
+    set((state) => {
+      if (!state.pilots[pilotId] || (state.pilots[pilotId].status !== 'RUNNING' && state.pilots[pilotId].status !== 'PAUSED')) return state
+      return {
+        pilots: {
+          ...state.pilots,
+          [pilotId]: { ...state.pilots[pilotId], sessionMinutes: Math.max(0, minutes) },
+        },
+      }
+    }),
+
+  startEngine: (pilotId, mode = 'game') =>
+    set((state) => ({
+      pilots: {
+        ...state.pilots,
+        [pilotId]: {
+          status: 'RUNNING',
+          sessionMinutes: 0,
+          burnerActive: true,
+          mode: mode === 'youtube' ? 'youtube' : 'game',
+        },
+      },
+    })),
+
+  pauseEngine: (pilotId) =>
+    set((state) => ({
+      pilots: {
+        ...state.pilots,
+        [pilotId]: { ...state.pilots[pilotId], status: 'PAUSED', burnerActive: false },
+      },
+    })),
+
+  resumeEngine: (pilotId) =>
+    set((state) => ({
+      pilots: {
+        ...state.pilots,
+        [pilotId]: { ...state.pilots[pilotId], status: 'RUNNING', burnerActive: true },
+      },
+    })),
+
+  stopEngine: (pilotId) => {
     const state = get()
-    return state.getGamingMinutesToday() + (state.currentSessionMinutes ?? 0)
+    const pilot = state.pilots?.[pilotId]
+    if (!pilot || pilot.status === 'IDLE') return
+    const sessionMinutes = pilot.sessionMinutes ?? 0
+    const mode = pilot.mode ?? 'game'
+    const reason = mode === 'youtube' ? 'Ютуб / Мультики' : 'Игровое время'
+    const weekend = !isWeekday()
+    for (let m = 1; m <= sessionMinutes; m++) {
+      const u = get().users.find((x) => x.id === pilotId)
+      if (u && u.balance <= 0) break
+      const totalBefore = get().getGamingMinutesToday()
+      const rate = weekend ? 1 : totalBefore + 1 > 60 ? 2 : 1
+      get().spendPoints(pilotId, rate, reason)
+      get().addGamingMinutesToday(1, mode, [pilotId])
+    }
+    set((s) => ({
+      pilots: {
+        ...s.pilots,
+        [pilotId]: initialPilotState(),
+      },
+    }))
   },
 
-  /** Текущая сессия: режим и пилоты (для отображения «сейчас играют» в статистике). */
-  currentSessionMode: null,
-  currentSessionPilotIds: [],
-  setCurrentSessionInfo: (mode, pilotIds) =>
-    set({ currentSessionMode: mode ?? null, currentSessionPilotIds: pilotIds ?? [] }),
+  toggleAll: (action, mode = 'game') => {
+    if (action === 'start') {
+      set((state) => ({
+        pilots: {
+          ...state.pilots,
+          roma: { status: 'RUNNING', sessionMinutes: 0, burnerActive: true, mode: mode === 'youtube' ? 'youtube' : 'game' },
+          kirill: { status: 'RUNNING', sessionMinutes: 0, burnerActive: true, mode: mode === 'youtube' ? 'youtube' : 'game' },
+        },
+      }))
+    } else if (action === 'pause') {
+      set((state) => ({
+        pilots: {
+          ...state.pilots,
+          roma: { ...state.pilots.roma, status: 'PAUSED', burnerActive: false },
+          kirill: { ...state.pilots.kirill, status: 'PAUSED', burnerActive: false },
+        },
+      }))
+    } else if (action === 'stop') {
+      get().stopEngine('roma')
+      get().stopEngine('kirill')
+    }
+  },
 
-  /** Разбивка за сегодня: игра + мультики по каждому пилоту, с учётом текущей сессии. */
+  /** Минуты за сегодня: сохранённые + текущие сессии обоих пилотов. */
+  getDisplayMinutesToday: () => {
+    const state = get()
+    const base = state.getGamingMinutesToday()
+    const roma = state.pilots?.roma?.sessionMinutes ?? 0
+    const kirill = state.pilots?.kirill?.sessionMinutes ?? 0
+    return base + roma + kirill
+  },
+
+  /** Разбивка за сегодня: игра + мультики по каждому пилоту, с учётом текущих сессий. */
   getDisplayBreakdownToday: () => {
     const state = get()
     const today = getDateKey()
@@ -124,22 +295,24 @@ export const useAppStore = create((set, get) => ({
       game: { roma: 0, kirill: 0 },
       youtube: { roma: 0, kirill: 0 },
     }
-    const curMin = state.currentSessionMinutes ?? 0
-    const curMode = state.currentSessionMode
-    const curPilots = state.currentSessionPilotIds ?? []
     const game = { ...saved.game }
     const youtube = { ...saved.youtube }
-    if (curMin > 0 && curMode && curPilots.length > 0) {
-      const key = curMode === 'youtube' ? 'youtube' : 'game'
-      curPilots.forEach((id) => {
-        if (id === 'roma' || id === 'kirill') {
-          const prev = key === 'game' ? game[id] : youtube[id]
-          if (key === 'game') game[id] = (prev ?? 0) + curMin
-          else youtube[id] = (prev ?? 0) + curMin
-        }
-      })
-    }
+    PILOT_IDS.forEach((id) => {
+      const p = state.pilots?.[id]
+      if (!p || p.status === 'IDLE' || !p.mode) return
+      const cur = p.sessionMinutes ?? 0
+      if (cur <= 0) return
+      const key = p.mode === 'youtube' ? 'youtube' : 'game'
+      if (key === 'game') game[id] = (game[id] ?? 0) + cur
+      else youtube[id] = (youtube[id] ?? 0) + cur
+    })
     return { game, youtube }
+  },
+
+  /** Есть ли хотя бы один запущенный двигатель (для UI). */
+  isAnyEngineRunning: () => {
+    const state = get()
+    return (state.pilots?.roma?.status === 'RUNNING' || state.pilots?.kirill?.status === 'RUNNING')
   },
 
   /** Load users from profiles and transactions from DB. Call once on app init. */

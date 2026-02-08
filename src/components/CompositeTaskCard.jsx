@@ -60,7 +60,7 @@ export function CompositeTaskCard({
         whileHover={!mainCompleted && !disabled ? { scale: 1.01 } : undefined}
         whileTap={!mainCompleted && !disabled ? { scale: 0.99 } : undefined}
         transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-        aria-label={`${main.label}, +${main.reward} кр`}
+        aria-label={`${main.label}, +${main.reward} XP`}
       >
         {mainCompleted && (
           <span className="absolute inset-0 flex items-center justify-center pointer-events-none">

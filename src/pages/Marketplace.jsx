@@ -40,7 +40,7 @@ function MarketCard({ item, onClick }) {
         {item.name}
       </span>
       <span className="font-mono text-lg tabular-nums text-roma">
-        {item.cost} кр
+        {item.cost} ⚡ XP
       </span>
     </button>
   )
@@ -135,7 +135,7 @@ export function Marketplace() {
         {selectedItem && !result && (
           <Modal title="Кто покупает?" onClose={closeSelectModal}>
             <p className="font-mono text-slate-400 text-sm mb-4">
-              {selectedItem.name} — {selectedItem.cost} кредитов
+              {selectedItem.name} — {selectedItem.cost} XP
             </p>
             <div className="flex flex-col gap-2">
               {users.map((user) => (

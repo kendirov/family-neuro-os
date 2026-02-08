@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/useAppStore'
@@ -91,11 +92,15 @@ function DayFuse({ minutes }) {
  * Дни недели с подсказкой «Будни»/«Выходной», у сегодня — фитилёк (0–60 зелёный, 45–60 жёлтый, 60+ красный).
  */
 export function WeekProgressBar() {
-  const getDisplayMinutesToday = useAppStore((s) => s.getDisplayMinutesToday)
+  const pilots = useAppStore((s) => s.pilots)
+  const gamingToday = useAppStore((s) => s.gamingToday)
+  const minutesToday = useMemo(
+    () => useAppStore.getState().getDisplayMinutesToday(),
+    [pilots, gamingToday]
+  )
   const today = new Date()
   const dayIndex = today.getDay()
   const currentWeekdayIndex = dayIndex === 0 ? 6 : dayIndex - 1
-  const minutesToday = getDisplayMinutesToday()
 
   return (
     <div className="shrink-0 px-3 py-4">

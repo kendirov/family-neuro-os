@@ -93,11 +93,15 @@ function StatRow({ title, icon: Icon, modeKey, breakdown, isLive }) {
  */
 export function TodayStats() {
   const getDisplayBreakdownToday = useAppStore((s) => s.getDisplayBreakdownToday)
-  useAppStore((s) => s.currentSessionMode)
-  useAppStore((s) => s.currentSessionMinutes)
+  const pilots = useAppStore((s) => s.pilots)
   useAppStore((s) => s.dailyGamingBreakdown)
-  const currentSessionMode = useAppStore((s) => s.currentSessionMode)
   const breakdown = getDisplayBreakdownToday()
+  const isLiveGame =
+    (pilots?.roma?.status === 'RUNNING' && pilots?.roma?.mode === 'game') ||
+    (pilots?.kirill?.status === 'RUNNING' && pilots?.kirill?.mode === 'game')
+  const isLiveYoutube =
+    (pilots?.roma?.status === 'RUNNING' && pilots?.roma?.mode === 'youtube') ||
+    (pilots?.kirill?.status === 'RUNNING' && pilots?.kirill?.mode === 'youtube')
 
   return (
     <div className="shrink-0 space-y-3">
@@ -116,14 +120,14 @@ export function TodayStats() {
           icon={Gamepad2}
           modeKey="game"
           breakdown={breakdown}
-          isLive={currentSessionMode === 'game'}
+          isLive={isLiveGame}
         />
         <StatRow
           title="Смотрели мультики"
           icon={Tv}
           modeKey="youtube"
           breakdown={breakdown}
-          isLive={currentSessionMode === 'youtube'}
+          isLive={isLiveYoutube}
         />
       </div>
     </div>

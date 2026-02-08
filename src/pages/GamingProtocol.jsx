@@ -39,7 +39,7 @@ export function GamingProtocol() {
     playerChoice === 'both' ? ['roma', 'kirill'] : playerChoice ? [playerChoice] : []
   const costPerUser = minutes
   const totalCostDisplay =
-    playerChoice === 'both' ? `${minutes} кр каждому (всего ${minutes * 2})` : `${minutes} кр`
+    playerChoice === 'both' ? `${minutes} XP каждому (всего ${minutes * 2})` : `${minutes} XP`
   const canStart =
     selectedUserIds.length > 0 &&
     selectedUserIds.every((id) => {
@@ -214,7 +214,7 @@ export function GamingProtocol() {
             </p>
             {selectedUserIds.length > 0 && !canStart && (
               <p className="font-mono text-alert text-sm mt-2">
-                Недостаточно кредитов у одного или обоих пилотов.
+                Недостаточно XP у одного или обоих пилотов.
               </p>
             )}
           </section>

@@ -356,7 +356,7 @@ export function GamingTimerWidget() {
               СТОИМОСТЬ СЕССИИ
             </p>
             <p className="font-lcd text-xl sm:text-2xl font-bold tabular-nums text-red-400">
-              −{totalCreditsBurned} кр
+              −{totalCreditsBurned} ⚡ XP
             </p>
           </div>
 
@@ -369,7 +369,7 @@ export function GamingTimerWidget() {
                   isOverdrive ? 'text-red-400' : 'text-slate-300'
                 )}
               >
-                {burnRate} кр/мин
+                {burnRate} XP/мин
               </p>
             </div>
             <div className="rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-2 text-center">
@@ -386,7 +386,7 @@ export function GamingTimerWidget() {
 
       {status === 'idle' && selectedUserIds.length > 0 && !canStart && (
         <p className="font-mono text-red-400 text-xs uppercase">
-          Недостаточно кредитов (минимум 1 кр)
+          Недостаточно XP (минимум 1 XP)
         </p>
       )}
 
@@ -408,7 +408,7 @@ export function GamingTimerWidget() {
             </p>
             <p className="font-mono text-slate-400 text-sm mb-1">Списано</p>
             <p className="font-lcd text-2xl font-bold text-red-400 mb-6">
-              −{sessionSummary.totalCost} кр
+              −{sessionSummary.totalCost} ⚡ XP
             </p>
             <button
               type="button"
