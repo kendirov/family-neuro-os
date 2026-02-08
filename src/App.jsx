@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { Dashboard } from '@/pages/Dashboard'
 import { supabase } from '@/lib/supabase'
 import { useAppStore } from '@/stores/useAppStore'
@@ -51,6 +51,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Dashboard mode="pilot" />} />
+      <Route path="/app" element={<Navigate to="/admin" replace />} />
       <Route path="/admin" element={<Dashboard mode="commander" />} />
     </Routes>
   )

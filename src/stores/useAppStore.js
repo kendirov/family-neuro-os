@@ -65,16 +65,32 @@ export const useAppStore = create((set, get) => ({
 
   gamingToday: { dateKey: '', minutes: 0 },
   dailyGamingMinutes: {},
+  /** По дням и режимам: { [dateKey]: { game: { roma, kirill }, youtube: { roma, kirill } } } */
+  dailyGamingBreakdown: {},
   totalFlightTimeMinutes: 0,
-  addGamingMinutesToday: (minutes) =>
+  addGamingMinutesToday: (minutes, mode = 'game', pilotIds = []) =>
     set((state) => {
       const today = getDateKey()
       const prev = state.gamingToday?.dateKey === today ? state.gamingToday.minutes : 0
       const dayMinutes = (state.dailyGamingMinutes?.[today] ?? 0) + minutes
       const totalFlight = (state.totalFlightTimeMinutes ?? 0) + minutes
+      const prevBreakdown = state.dailyGamingBreakdown?.[today] ?? {
+        game: { roma: 0, kirill: 0 },
+        youtube: { roma: 0, kirill: 0 },
+      }
+      const nextBreakdown = { ...prevBreakdown }
+      nextBreakdown.game = { ...prevBreakdown.game }
+      nextBreakdown.youtube = { ...prevBreakdown.youtube }
+      const modeKey = mode === 'youtube' ? 'youtube' : 'game'
+      pilotIds.forEach((id) => {
+        if (id === 'roma' || id === 'kirill') {
+          nextBreakdown[modeKey][id] = (nextBreakdown[modeKey][id] ?? 0) + minutes
+        }
+      })
       return {
         gamingToday: { dateKey: today, minutes: prev + minutes },
         dailyGamingMinutes: { ...(state.dailyGamingMinutes ?? {}), [today]: dayMinutes },
+        dailyGamingBreakdown: { ...(state.dailyGamingBreakdown ?? {}), [today]: nextBreakdown },
         totalFlightTimeMinutes: totalFlight,
       }
     }),
@@ -82,6 +98,48 @@ export const useAppStore = create((set, get) => ({
     const today = getDateKey()
     const state = get()
     return state.gamingToday?.dateKey === today ? (state.gamingToday?.minutes ?? 0) : 0
+  },
+
+  /** Текущая сессия (минуты) — обновляется каждую минуту пока двигатель работает. Для «фитилька» в реальном времени. */
+  currentSessionMinutes: 0,
+  setCurrentSessionMinutes: (n) => set({ currentSessionMinutes: Math.max(0, n) }),
+
+  /** Минуты за сегодня для отображения: сохранённые + текущая сессия. */
+  getDisplayMinutesToday: () => {
+    const state = get()
+    return state.getGamingMinutesToday() + (state.currentSessionMinutes ?? 0)
+  },
+
+  /** Текущая сессия: режим и пилоты (для отображения «сейчас играют» в статистике). */
+  currentSessionMode: null,
+  currentSessionPilotIds: [],
+  setCurrentSessionInfo: (mode, pilotIds) =>
+    set({ currentSessionMode: mode ?? null, currentSessionPilotIds: pilotIds ?? [] }),
+
+  /** Разбивка за сегодня: игра + мультики по каждому пилоту, с учётом текущей сессии. */
+  getDisplayBreakdownToday: () => {
+    const state = get()
+    const today = getDateKey()
+    const saved = state.dailyGamingBreakdown?.[today] ?? {
+      game: { roma: 0, kirill: 0 },
+      youtube: { roma: 0, kirill: 0 },
+    }
+    const curMin = state.currentSessionMinutes ?? 0
+    const curMode = state.currentSessionMode
+    const curPilots = state.currentSessionPilotIds ?? []
+    const game = { ...saved.game }
+    const youtube = { ...saved.youtube }
+    if (curMin > 0 && curMode && curPilots.length > 0) {
+      const key = curMode === 'youtube' ? 'youtube' : 'game'
+      curPilots.forEach((id) => {
+        if (id === 'roma' || id === 'kirill') {
+          const prev = key === 'game' ? game[id] : youtube[id]
+          if (key === 'game') game[id] = (prev ?? 0) + curMin
+          else youtube[id] = (prev ?? 0) + curMin
+        }
+      })
+    }
+    return { game, youtube }
   },
 
   /** Load users from profiles and transactions from DB. Call once on app init. */

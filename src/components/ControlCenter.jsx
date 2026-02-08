@@ -21,27 +21,45 @@ const MODES = [
   { id: 'youtube', label: 'ЮТУБ / МУЛЬТИКИ', Icon: Tv, color: 'pink' },
 ]
 
-const PILOT_OPTIONS = [
-  { id: 'roma', label: 'Рома' },
-  { id: 'kirill', label: 'Кирилл' },
-  { id: 'both', label: 'Оба' },
-]
+const PILOT_IDS = ['roma', 'kirill'] // order for display
+
+/** Toggle pilot in set. Returns new array of selected pilot ids. */
+function togglePilot(selectedIds, pilotId) {
+  if (pilotId === 'roma' || pilotId === 'kirill') {
+    const has = selectedIds.includes(pilotId)
+    return has ? selectedIds.filter((id) => id !== pilotId) : [...selectedIds, pilotId]
+  }
+  if (pilotId === 'both') {
+    const bothSelected = selectedIds.length === 2
+    return bothSelected ? [] : ['roma', 'kirill']
+  }
+  return selectedIds
+}
 
 /** Max minutes for fuel gauge visual (depletes over this range). */
 const FUEL_GAUGE_MAX_MIN = 60
 
+/** Будни (Пн–Пт): до 1 ч — 1 кр/мин, после 1 ч — 2 кр/мин. Выходные — всегда 1 кр/мин. */
+function isWeekday() {
+  const d = new Date().getDay() // 0 = Sun, 6 = Sat
+  return d >= 1 && d <= 5
+}
+
 /**
  * Control Center: Combustion Engine timer.
- * 1 Credit = 1 Minute. Mode (Game vs YouTube), Pilot (Roma / Kirill / BOTH), START/STOP engine.
- * Deducts 1 cr per pilot every minute while running. Session summary modal on STOP.
+ * 1 Credit = 1 Minute (будни: после 60 мин — 2 кр/мин). Pilot toggles. Session summary on STOP.
  */
 export function ControlCenter() {
   const users = useAppStore((s) => s.users)
   const spendPoints = useAppStore((s) => s.spendPoints)
   const addGamingMinutesToday = useAppStore((s) => s.addGamingMinutesToday)
+  const getGamingMinutesToday = useAppStore((s) => s.getGamingMinutesToday)
+  const setCurrentSessionMinutes = useAppStore((s) => s.setCurrentSessionMinutes)
+  const setCurrentSessionInfo = useAppStore((s) => s.setCurrentSessionInfo)
 
   const [mode, setMode] = useState('game')
-  const [pilot, setPilot] = useState('roma') // 'roma' | 'kirill' | 'both'
+  /** Выбранные пилоты: массив id. Клик по имени — вкл/выкл; «Оба» — оба вкл или оба выкл. */
+  const [selectedPilotIds, setSelectedPilotIds] = useState(['roma'])
   const [engineActive, setEngineActive] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [sessionCreditsBurned, setSessionCreditsBurned] = useState(0)
@@ -51,10 +69,11 @@ export function ControlCenter() {
   const intervalRef = useRef(null)
   const sessionStartRef = useRef(0)
   const sessionCreditsBurnedRef = useRef(0)
+  const sessionStartSavedMinutesRef = useRef(0) // минут за день на старте сессии (для X1/X2)
   sessionCreditsBurnedRef.current = sessionCreditsBurned
 
   const reason = mode === 'game' ? 'Игровое время' : 'YouTube / Мультики'
-  const selectedIds = pilot === 'both' ? ['roma', 'kirill'] : [pilot]
+  const selectedIds = selectedPilotIds
   const creditsPerMinute = selectedIds.length
 
   const canStart =
@@ -67,6 +86,8 @@ export function ControlCenter() {
   const startEngine = () => {
     if (!canStart || engineActive) return
     playEngineRev()
+    sessionStartSavedMinutesRef.current = getGamingMinutesToday()
+    setCurrentSessionInfo(mode, selectedIds)
     setEngineActive(true)
     setElapsedSeconds(0)
     setSessionCreditsBurned(0)
@@ -77,9 +98,10 @@ export function ControlCenter() {
   const stopEngine = () => {
     if (!engineActive) return
     if (intervalRef.current) clearInterval(intervalRef.current)
+    setCurrentSessionMinutes(0)
+    setCurrentSessionInfo(null, [])
     const totalMinutes = Math.floor(elapsedSeconds / 60)
     const totalCost = sessionCreditsBurned
-    if (totalMinutes > 0) addGamingMinutesToday(totalMinutes)
     playCashRegister()
     setSessionSummary({ totalTimeMin: totalMinutes, totalCost })
     setEngineActive(false)
@@ -88,20 +110,26 @@ export function ControlCenter() {
     lastDeductedMinuteRef.current = 0
   }
 
-  /** Timer: tick every second while engine active. */
+  /** Timer: tick every second. */
   useEffect(() => {
     if (!engineActive) return
-    intervalRef.current = setInterval(() => {
-      setElapsedSeconds((s) => s + 1)
-    }, 1000)
+    intervalRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
   }, [engineActive])
 
+  /** Обновляем currentSessionMinutes для «фитилька» в реальном времени. */
+  useEffect(() => {
+    if (!engineActive) {
+      setCurrentSessionMinutes(0)
+      return
+    }
+    setCurrentSessionMinutes(Math.floor(elapsedSeconds / 60))
+  }, [engineActive, elapsedSeconds, setCurrentSessionMinutes])
+
   /**
-   * Per-minute deduction: 1 credit = 1 minute per pilot.
-   * If BOTH, deduct 1 from Roma and 1 from Kirill every minute.
+   * Per-minute deduction: будни — до 60 мин 1 кр/мин, после 60 мин 2 кр/мин; выходные — 1 кр/мин.
    */
   useEffect(() => {
     if (!engineActive || selectedIds.length === 0) return
@@ -119,10 +147,11 @@ export function ControlCenter() {
     if (pilotsWithBalance.length < selectedIds.length) {
       playError()
       if (intervalRef.current) clearInterval(intervalRef.current)
+      setCurrentSessionMinutes(0)
+      setCurrentSessionInfo(null, [])
       const totalMinutes = Math.floor(elapsedSeconds / 60)
       const totalCost = sessionCreditsBurnedRef.current
       setSessionSummary({ totalTimeMin: totalMinutes, totalCost })
-      if (totalMinutes > 0) addGamingMinutesToday(totalMinutes)
       setEngineActive(false)
       setElapsedSeconds(0)
       setSessionCreditsBurned(0)
@@ -130,12 +159,19 @@ export function ControlCenter() {
       return
     }
 
+    const saved = sessionStartSavedMinutesRef.current
+    const weekday = isWeekday()
+    let burned = 0
     for (let m = oldLast + 1; m <= currentMinute; m++) {
-      selectedIds.forEach((id) => spendPoints(id, 1, reason))
+      const totalAfterThisMinute = saved + m
+      const rate = weekday && totalAfterThisMinute > 60 ? 2 : 1
+      selectedIds.forEach((id) => spendPoints(id, rate, reason))
+      addGamingMinutesToday(1, mode, selectedIds)
+      burned += rate * selectedIds.length
     }
     lastDeductedMinuteRef.current = currentMinute
-    setSessionCreditsBurned((prev) => prev + (currentMinute - oldLast) * selectedIds.length)
-  }, [engineActive, elapsedSeconds, selectedIds, reason, spendPoints, addGamingMinutesToday])
+    setSessionCreditsBurned((prev) => prev + burned)
+  }, [engineActive, elapsedSeconds, selectedIds, reason, spendPoints, addGamingMinutesToday, setCurrentSessionMinutes, mode])
 
   const fuelGaugePercent = Math.max(
     0,
@@ -181,26 +217,45 @@ export function ControlCenter() {
         </div>
       </div>
 
-      {/* 2. Pilot Selector: Roma | Kirill | BOTH */}
+      {/* 2. Pilot Selector: Рома / Кирилл / Оба — переключатели (вкл/выкл) */}
       <div>
-        <p className="font-mono text-[10px] text-slate-500 mb-1.5 uppercase">Пилот</p>
-        <div className="flex rounded-2xl border-[3px] border-slate-600 overflow-hidden bg-slate-700/80 p-1">
-          {PILOT_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => setPilot(opt.id)}
-              disabled={engineActive}
-              className={cn(
-                'flex-1 min-h-[44px] rounded-xl font-gaming text-sm font-bold uppercase transition touch-manipulation text-pop',
-                pilot === opt.id
-                  ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 shadow-[0_0_10px_rgba(34,211,238,0.3)]'
-                  : 'text-slate-400 hover:text-slate-300 hover:bg-slate-700/50 disabled:opacity-60'
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <p className="font-mono text-[10px] text-slate-500 mb-1.5 uppercase">
+          Пилот — нажми, чтобы включить или выключить
+        </p>
+        <div className="flex gap-2 flex-wrap">
+          {PILOT_IDS.map((id) => {
+            const label = id === 'roma' ? 'Рома' : 'Кирилл'
+            const isSelected = selectedIds.includes(id)
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSelectedPilotIds((prev) => togglePilot(prev, id))}
+                disabled={engineActive}
+                className={cn(
+                  'flex-1 min-w-0 min-h-[44px] rounded-2xl border-[3px] font-gaming text-sm font-bold uppercase transition touch-manipulation text-pop',
+                  isSelected
+                    ? 'bg-cyan-500/30 text-cyan-300 border-cyan-500/60 shadow-[0_0_10px_rgba(34,211,238,0.3)]'
+                    : 'border-slate-600 text-slate-400 hover:text-slate-300 hover:bg-slate-700/60 hover:border-slate-500 disabled:opacity-60'
+                )}
+              >
+                {label}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            onClick={() => setSelectedPilotIds((prev) => togglePilot(prev, 'both'))}
+            disabled={engineActive}
+            className={cn(
+              'flex-1 min-w-0 min-h-[44px] rounded-2xl border-[3px] font-gaming text-sm font-bold uppercase transition touch-manipulation text-pop',
+              selectedIds.length === 2
+                ? 'bg-cyan-500/30 text-cyan-300 border-cyan-500/60 shadow-[0_0_10px_rgba(34,211,238,0.3)]'
+                : 'border-slate-600 text-slate-400 hover:text-slate-300 hover:bg-slate-700/60 hover:border-slate-500 disabled:opacity-60'
+            )}
+          >
+            Оба
+          </button>
         </div>
       </div>
 
@@ -226,6 +281,11 @@ export function ControlCenter() {
           {engineActive ? '⏹ ОСТАНОВИТЬ ДВИГАТЕЛЬ' : '▶ ЗАПУСК ДВИГАТЕЛЯ'}
         </motion.button>
 
+        {!engineActive && selectedIds.length === 0 && (
+          <p className="font-mono text-amber-400 text-xs uppercase text-center">
+            Выберите пилота (Рома / Кирилл / Оба)
+          </p>
+        )}
         {!canStart && !engineActive && selectedIds.length > 0 && (
           <p className="font-mono text-red-400 text-xs uppercase text-center">
             Недостаточно кредитов (1 кр = 1 мин)

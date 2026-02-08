@@ -55,16 +55,19 @@ export function CompositeTaskCard({
         </span>
       </div>
 
-      {/* Body: Hero (main) + Bonus zone */}
-      <div className="p-2 flex flex-col sm:flex-row gap-2 items-stretch">
-        {/* Left: ONE big primary button — "Съел +15 кр" */}
-        <div className="flex-1 min-w-0">
+      {/* Body: 1) Primary "Съел" (always first, full width), 2) Bonuses row */}
+      <div className="p-3 flex flex-col gap-3">
+        {/* 1) Main action — one big button: "Съел завтрак +15 кр" (primary, always visible) */}
+        <div className="w-full">
+          <p className="font-gaming text-[10px] uppercase tracking-wider text-amber-400/80 mb-1.5">
+            Покушал — нажми один раз
+          </p>
           <motion.button
             type="button"
             onClick={handleMain}
             disabled={mainCompleted || disabled}
             className={cn(
-              'relative w-full min-h-[56px] rounded-2xl border-[3px] flex items-center justify-center gap-2 font-gaming font-bold text-base transition touch-manipulation overflow-hidden',
+              'relative w-full min-h-[60px] rounded-2xl border-[3px] flex items-center justify-center gap-2 font-gaming font-bold text-lg transition touch-manipulation overflow-hidden',
               mainCompleted
                 ? 'border-slate-600/40 bg-slate-800/50 text-slate-500 cursor-default opacity-50 grayscale shadow-[inset_0_3px_10px_rgba(0,0,0,0.4)]'
                 : 'border-amber-500/60 bg-amber-500/20 text-amber-100 shadow-[0_0_14px_rgba(251,191,36,0.25),0_4px_10px_rgba(0,0,0,0.3)] hover:bg-amber-500/30 hover:shadow-[0_0_18px_rgba(251,191,36,0.35),0_5px_12px_rgba(0,0,0,0.35)] active:scale-[0.98]'
@@ -78,6 +81,7 @@ export function CompositeTaskCard({
             whileHover={!mainCompleted && !disabled ? { scale: 1.02 } : undefined}
             whileTap={!mainCompleted && !disabled ? { scale: 0.98 } : undefined}
             transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+            aria-label={`Съел ${main.label}, +${main.reward} кр`}
           >
             {mainCompleted && (
               <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -91,8 +95,12 @@ export function CompositeTaskCard({
           </motion.button>
         </div>
 
-        {/* Right: Bonus zone — small toggle badges */}
-        <div className="flex flex-wrap gap-1.5 items-center justify-end sm:justify-start min-w-0">
+        {/* 2) Bonus zone — "дополнительно": Вовремя +5, Много +10 */}
+        <div className="w-full">
+          <p className="font-gaming text-[10px] uppercase tracking-wider text-amber-400/80 mb-1.5">
+            Дополнительно (по желанию)
+          </p>
+          <div className="flex flex-wrap gap-2">
           {modifiers.map((mod) => {
             const modStatus = getStatus(mod.id)
             const modCompleted = modStatus === 'completed'
@@ -124,6 +132,7 @@ export function CompositeTaskCard({
               </motion.button>
             )
           })}
+          </div>
         </div>
       </div>
     </div>

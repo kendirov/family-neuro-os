@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router-dom'
 import {
   Candy,
   Banknote,
@@ -20,6 +21,7 @@ import { CountUpNumber } from '@/components/CountUpNumber'
 import { MissionLog } from '@/components/MissionLog'
 import { TransactionModal } from '@/components/TransactionModal'
 import { WeekProgressBar } from '@/components/WeekProgressBar'
+import { TodayStats } from '@/components/TodayStats'
 import { motion } from 'framer-motion'
 import { Wallet } from 'lucide-react'
 
@@ -169,8 +171,10 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
   }
 
   const applyDelta = (action, isDaily = false, event = null, options = {}) => {
-    const amount = Math.abs(action.credits)
-    if (action.credits >= 0) {
+    const rawCredits = action.credits ?? action.reward ?? 0
+    const amount = Math.abs(Number(rawCredits))
+    if (amount <= 0 || Number.isNaN(amount)) return
+    if (rawCredits >= 0) {
       addPoints(user.id, amount, action.reason)
       if (options.soundOverride === 'chime') playChime()
       else playCoin()
@@ -207,11 +211,13 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
   const handleMissionClick = (action, e) => applyDelta(action, false, e)
   const handlePenaltyClick = (action, e) => applyDelta(action, false, e)
 
-  /** Mission Log: complete task with chime and floating +N toward score. */
+  /** Mission Log: complete task with chime and floating +N toward score. Main (Съел) and modifiers (Вовремя/Много) both go through here. */
   const handleMissionTaskComplete = (task, e) => {
     if (task.isDaily && isDailyBaseComplete(user.id, task.id)) return
-    const action = { id: task.id, credits: task.credits, reason: task.reason, label: task.label }
-    applyDelta(action, task.isDaily, e, { soundOverride: 'chime', floatFromCard: true })
+    const credits = task.credits ?? task.reward ?? 0
+    const action = { id: task.id, credits, reason: task.reason ?? task.label, label: task.label ?? task.id }
+    if (typeof credits !== 'number' || credits <= 0) return
+    applyDelta(action, task.isDaily !== false, e, { soundOverride: 'chime', floatFromCard: true })
   }
 
   useEffect(() => {
@@ -817,12 +823,20 @@ export function Dashboard({ mode = 'pilot' }) {
     <KioskLayout>
       <Header />
       <WeekProgressBar />
-      {/* Role label */}
-      <div className="shrink-0 px-4 pt-2 pb-0">
+      {/* Role label + ссылка в админку (чтобы открывать без 404: сначала главная, потом клик) */}
+      <div className="shrink-0 px-4 pt-2 pb-0 flex flex-col items-center gap-2">
         {isPilot ? (
-          <p className="font-mono text-sm text-slate-400 tracking-wider text-center">
-            РЕЖИМ ПИЛОТА (ТОЛЬКО ПРОСМОТР)
-          </p>
+          <>
+            <p className="font-mono text-sm text-slate-400 tracking-wider text-center">
+              РЕЖИМ ПИЛОТА (ТОЛЬКО ПРОСМОТР)
+            </p>
+            <Link
+              to="/admin"
+              className="font-gaming text-sm font-bold uppercase tracking-wider px-5 py-2.5 rounded-2xl border-2 border-amber-500/60 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 hover:border-amber-500/80 transition shadow-[0_0_12px_rgba(251,191,36,0.2)]"
+            >
+              🔓 Открыть панель админа
+            </Link>
+          </>
         ) : (
           <p className="font-mono text-sm font-bold text-red-500 tracking-wider text-center">
             РЕЖИМ КОМАНДИРА
@@ -877,6 +891,7 @@ export function Dashboard({ mode = 'pilot' }) {
           <h2 className="font-gaming text-base text-slate-400 mb-3 shrink-0 uppercase tracking-wider">ЦЕНТР УПРАВЛЕНИЯ</h2>
           <div className="flex flex-1 flex-col gap-4 min-h-0 overflow-auto">
             <ControlCenter />
+            <TodayStats />
             <div className="flex-1 min-h-0 flex flex-col">
               <MarketplaceSection />
             </div>
