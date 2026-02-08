@@ -45,95 +45,67 @@ export function CompositeTaskCard({
         className
       )}
     >
-      {/* Header: Title + Icon */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b-2 border-amber-500/30 bg-gradient-to-r from-amber-500/20 to-amber-600/10">
-        <span className="text-2xl shrink-0 drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]" aria-hidden>
-          {main.emoji}
+      {/* Row 1: Main — полная ширина, «сочный» градиент (оранж/янтарь). [ 🍳 ЗАВТРАК +15 ] */}
+      <motion.button
+        type="button"
+        onClick={handleMain}
+        disabled={mainCompleted || disabled}
+        className={cn(
+          'relative w-full min-h-[52px] rounded-none border-b-[2px] flex items-center justify-center gap-2 font-gaming font-bold text-base uppercase tracking-wider transition touch-manipulation overflow-hidden',
+          mainCompleted
+            ? 'border-slate-600/40 bg-slate-800/50 text-slate-500 cursor-default opacity-50 grayscale shadow-[inset_0_3px_10px_rgba(0,0,0,0.4)]'
+            : 'border-amber-500/70 bg-gradient-to-b from-amber-400/35 via-amber-500/30 to-orange-600/35 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.3),inset_0_1px_0_rgba(255,255,255,0.15)] hover:from-amber-400/45 hover:via-amber-500/40 hover:to-orange-600/45 active:scale-[0.99]'
+        )}
+        animate={{ scale: mainCompleted ? 0.98 : 1 }}
+        whileHover={!mainCompleted && !disabled ? { scale: 1.01 } : undefined}
+        whileTap={!mainCompleted && !disabled ? { scale: 0.99 } : undefined}
+        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+        aria-label={`${main.label}, +${main.reward} кр`}
+      >
+        {mainCompleted && (
+          <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <Check className="h-7 w-7 text-emerald-400/90 drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]" strokeWidth={2.5} />
+          </span>
+        )}
+        <span className={cn('relative z-0 flex items-center gap-2', mainCompleted && 'opacity-0')}>
+          <span aria-hidden>{main.emoji}</span>
+          <span>{main.label.toUpperCase()}</span>
+          <span className="font-mono tabular-nums">+{main.reward}</span>
         </span>
-        <span className="font-gaming text-base uppercase tracking-wider text-amber-100 text-pop">
-          {main.label}
-        </span>
-      </div>
+      </motion.button>
 
-      {/* Body: 1) Primary "Съел" (always first, full width), 2) Bonuses row */}
-      <div className="p-3 flex flex-col gap-3">
-        {/* 1) Main action — one big button: "Съел завтрак +15 кр" (primary, always visible) */}
-        <div className="w-full">
-          <p className="font-gaming text-[10px] uppercase tracking-wider text-amber-400/80 mb-1.5">
-            Покушал — нажми один раз
-          </p>
-          <motion.button
-            type="button"
-            onClick={handleMain}
-            disabled={mainCompleted || disabled}
-            className={cn(
-              'relative w-full min-h-[60px] rounded-2xl border-[3px] flex items-center justify-center gap-2 font-gaming font-bold text-lg transition touch-manipulation overflow-hidden',
-              mainCompleted
-                ? 'border-slate-600/40 bg-slate-800/50 text-slate-500 cursor-default opacity-50 grayscale shadow-[inset_0_3px_10px_rgba(0,0,0,0.4)]'
-                : 'border-amber-500/60 bg-amber-500/20 text-amber-100 shadow-[0_0_14px_rgba(251,191,36,0.25),0_4px_10px_rgba(0,0,0,0.3)] hover:bg-amber-500/30 hover:shadow-[0_0_18px_rgba(251,191,36,0.35),0_5px_12px_rgba(0,0,0,0.35)] active:scale-[0.98]'
-            )}
-            animate={{
-              scale: mainCompleted ? 0.98 : 1,
-              boxShadow: mainCompleted
-                ? 'inset 0 3px 10px rgba(0,0,0,0.4)'
-                : undefined,
-            }}
-            whileHover={!mainCompleted && !disabled ? { scale: 1.02 } : undefined}
-            whileTap={!mainCompleted && !disabled ? { scale: 0.98 } : undefined}
-            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-            aria-label={`Съел ${main.label}, +${main.reward} кр`}
-          >
-            {mainCompleted && (
-              <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <Check className="h-8 w-8 text-emerald-400/90 drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]" strokeWidth={2.5} />
+      {/* Row 2: Модификаторы — как физические переключатели (объёмная рамка, вдавленность при нажатии). */}
+      <div className="flex border-t-0">
+        {modifiers.map((mod) => {
+          const modStatus = getStatus(mod.id)
+          const modCompleted = modStatus === 'completed'
+          const handleMod = (e) => {
+            if (modCompleted || disabled) return
+            onTaskComplete(mod, e)
+          }
+          return (
+            <motion.button
+              key={mod.id}
+              type="button"
+              onClick={handleMod}
+              disabled={modCompleted || disabled}
+              className={cn(
+                'flex-1 min-h-[44px] rounded-none border-r-2 last:border-r-0 font-gaming text-xs font-bold tabular-nums transition touch-manipulation flex items-center justify-center gap-1.5',
+                modCompleted
+                  ? 'bg-slate-800/70 text-slate-500 opacity-60 grayscale cursor-default border-slate-600/50 shadow-[inset_0_3px_6px_rgba(0,0,0,0.4)] border-b-0'
+                  : 'bg-amber-700/40 text-amber-200 border-amber-800/80 border-b-4 border-r-amber-800/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_3px_0_rgba(0,0,0,0.25)] hover:bg-amber-700/50 active:border-b-[2px] active:shadow-[inset_0_2px_4px_rgba(0,0,0,0.35)] active:translate-y-[2px]'
+              )}
+              whileTap={!modCompleted && !disabled ? { scale: 0.98 } : undefined}
+              aria-pressed={modCompleted}
+            >
+              <span className="shrink-0" aria-hidden>
+                {mod.emoji}
               </span>
-            )}
-            <span className={cn('relative z-0', mainCompleted && 'opacity-0')}>
-              <span>Съел</span>
-              <span className="font-mono tabular-nums">+{main.reward} кр</span>
-            </span>
-          </motion.button>
-        </div>
-
-        {/* 2) Bonus zone — "дополнительно": Вовремя +5, Много +10 */}
-        <div className="w-full">
-          <p className="font-gaming text-[10px] uppercase tracking-wider text-amber-400/80 mb-1.5">
-            Дополнительно (по желанию)
-          </p>
-          <div className="flex flex-wrap gap-2">
-          {modifiers.map((mod) => {
-            const modStatus = getStatus(mod.id)
-            const modCompleted = modStatus === 'completed'
-            const handleMod = (e) => {
-              if (modCompleted || disabled) return
-              onTaskComplete(mod, e)
-            }
-            return (
-              <motion.button
-                key={mod.id}
-                type="button"
-                onClick={handleMod}
-                disabled={modCompleted || disabled}
-                className={cn(
-                  'shrink-0 min-h-[40px] px-3 rounded-2xl border-[3px] font-gaming text-xs font-bold tabular-nums transition touch-manipulation flex items-center gap-1.5 text-pop',
-                  modCompleted
-                    ? 'border-slate-600/40 bg-slate-800/50 text-slate-500 opacity-50 grayscale shadow-[inset_0_2px_6px_rgba(0,0,0,0.35)] cursor-default'
-                    : 'border-amber-400/50 bg-amber-500/15 text-amber-200 shadow-[0_2px_6px_rgba(0,0,0,0.25)] hover:bg-amber-500/25 hover:shadow-[0_3px_8px_rgba(0,0,0,0.3)] active:scale-95'
-                )}
-                whileHover={!modCompleted && !disabled ? { scale: 1.05 } : undefined}
-                whileTap={!modCompleted && !disabled ? { scale: 0.95 } : undefined}
-                aria-pressed={modCompleted}
-              >
-                <span className="shrink-0" aria-hidden>
-                  {mod.emoji}
-                </span>
-                <span className="truncate max-w-[72px]">{mod.label}</span>
-                <span className="tabular-nums">+{mod.reward} кр</span>
-              </motion.button>
-            )
-          })}
-          </div>
-        </div>
+              <span className="truncate">{mod.label}</span>
+              <span className="tabular-nums">+{mod.reward}</span>
+            </motion.button>
+          )
+        })}
       </div>
     </div>
   )

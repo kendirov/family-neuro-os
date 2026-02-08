@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import {
@@ -142,6 +142,94 @@ const USER_THEMES = {
     accent: 'kirill',
     avatarBorder: 'border-purple-500/50 bg-purple-500/20 text-purple-400',
   },
+}
+
+const REASON_BONUS = 'Бонус (ручное)'
+const REASON_FINE = 'Штраф (ручное)'
+
+/** God Mode: compact Command Bar at top of Left Panel. Input + [Рома][Кирилл][Оба] + [⚡ НАЧИСЛИТЬ]. Terminal style. */
+function GodModeCommandBar({ roma, kirill, onShowToast, disabled }) {
+  const addPoints = useAppStore((s) => s.addPoints)
+  const spendPoints = useAppStore((s) => s.spendPoints)
+  const [input, setInput] = useState('')
+  const [target, setTarget] = useState('both') // 'roma' | 'kirill' | 'both'
+
+  const num = Number(input.trim())
+  const isValid = !Number.isNaN(num) && num !== 0 && Math.abs(num) <= 999999
+  const userIds = target === 'both' ? [roma?.id, kirill?.id].filter(Boolean) : target === 'roma' ? [roma?.id] : [kirill?.id]
+
+  const handleApply = () => {
+    if (!isValid || userIds.length === 0) return
+    const amount = Math.abs(num)
+    const reason = num >= 0 ? REASON_BONUS : REASON_FINE
+    if (num >= 0) {
+      userIds.forEach((id) => addPoints(id, amount, reason))
+      playCoin()
+      onShowToast?.({ message: `+${amount} — ${userIds.length > 1 ? 'Оба' : userIds[0] === 'roma' ? 'Рома' : 'Кирилл'}`, variant: 'success' })
+    } else {
+      userIds.forEach((id) => spendPoints(id, amount, reason))
+      playError()
+      onShowToast?.({ message: `−${amount} — ${userIds.length > 1 ? 'Оба' : userIds[0] === 'roma' ? 'Рома' : 'Кирилл'}`, variant: 'alert' })
+    }
+    setInput('')
+  }
+
+  if (disabled) return null
+
+  return (
+    <div
+      className="shrink-0 mb-3 rounded-xl border-2 border-slate-600/80 bg-slate-900/95 font-mono overflow-hidden shadow-[inset_0_2px_8px_rgba(0,0,0,0.4)]"
+      role="group"
+      aria-label="Ручное начисление"
+    >
+      <div className="flex items-stretch gap-0 min-h-[52px]">
+        <span className="flex items-center px-3 text-emerald-500/90 text-base select-none border-r border-slate-600">
+          $
+        </span>
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="±кр"
+          value={input}
+          onChange={(e) => setInput(e.target.value.replace(/[^\d\-]/g, ''))}
+          onKeyDown={(e) => e.key === 'Enter' && handleApply()}
+          className="flex-1 min-w-0 min-h-[52px] bg-transparent px-4 py-3 text-base text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-0 touch-manipulation"
+          style={{ minHeight: 52 }}
+          aria-label="Сумма (введите число)"
+        />
+        <div className="flex border-l border-slate-600">
+            {[
+            { id: 'roma', label: 'Рома' },
+            { id: 'kirill', label: 'Кирилл' },
+            { id: 'both', label: 'Оба' },
+          ].map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTarget(id)}
+              className={cn(
+                'min-h-[52px] px-3 sm:px-4 py-3 text-xs sm:text-sm font-bold uppercase border-r border-slate-600 last:border-r-0 transition touch-manipulation',
+                target === id
+                  ? 'bg-amber-500/30 text-amber-200 border-amber-500/50'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={handleApply}
+          disabled={!isValid}
+          className="min-h-[52px] px-4 sm:px-5 py-3 bg-amber-500/40 text-amber-100 font-bold text-sm uppercase border-l-2 border-amber-500/60 hover:bg-amber-500/50 disabled:opacity-40 disabled:pointer-events-none transition touch-manipulation"
+          aria-label="Начислить"
+        >
+          ⚡ НАЧИСЛИТЬ
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function formatTime(ts) {
@@ -814,6 +902,18 @@ export function Dashboard({ mode = 'pilot' }) {
   const isPilot = mode === 'pilot'
   const isCommander = mode === 'commander'
 
+  /** Right Panel glow: engine running = blue pulse; Overdrive (будни > 60 мин) = red alarm. Select only primitives/raw refs to avoid infinite re-renders. */
+  const engineRunning = useAppStore((s) => s.currentSessionMode != null)
+  const currentSessionMinutes = useAppStore((s) => s.currentSessionMinutes)
+  const gamingToday = useAppStore((s) => s.gamingToday)
+  const displayMinutesToday = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    const fromToday = gamingToday?.dateKey === today ? (gamingToday?.minutes ?? 0) : 0
+    return fromToday + (currentSessionMinutes ?? 0)
+  }, [currentSessionMinutes, gamingToday])
+  const isWeekday = new Date().getDay() >= 1 && new Date().getDay() <= 5
+  const overdrive = isWeekday && displayMinutesToday > 60
+
   const handleRemoveTransaction = (transactionId) => {
     removeTransaction(transactionId)
     setToast({ message: 'ОПЕРАЦИЯ ОТМЕНЕНА', variant: 'success' })
@@ -851,6 +951,14 @@ export function Dashboard({ mode = 'pilot' }) {
           <span className="panel-bolt bolt-bl" aria-hidden />
           <span className="panel-bolt bolt-br" aria-hidden />
           <h2 className="font-gaming text-base text-slate-400 mb-3 shrink-0 uppercase tracking-wider">Пилоты</h2>
+          {isCommander && (
+            <GodModeCommandBar
+              roma={roma}
+              kirill={kirill}
+              onShowToast={setToast}
+              disabled={false}
+            />
+          )}
           <div className="flex flex-col lg:flex-row flex-1 gap-3 min-h-0 min-w-0 overflow-y-auto mt-2">
             {roma && (
               <SupplyDepotColumn
@@ -882,8 +990,14 @@ export function Dashboard({ mode = 'pilot' }) {
         {/* Glowing divider — visible on laptop */}
         <div className="dashboard-divider shrink-0" aria-hidden />
 
-        {/* RIGHT PANEL — Control Core (40%) — glassmorphism */}
-        <section className="dashboard-right flex flex-col min-h-0 panel-glass rounded-2xl p-5 relative">
+        {/* RIGHT PANEL — Control Core (40%) — glassmorphism; glow when engine running / overdrive */}
+        <section
+          className={cn(
+            'dashboard-right flex flex-col min-h-0 panel-glass rounded-2xl p-5 relative',
+            engineRunning && overdrive && 'panel-right-glow-overdrive',
+            engineRunning && !overdrive && 'panel-right-glow-engine'
+          )}
+        >
           <span className="panel-bolt bolt-tl" aria-hidden />
           <span className="panel-bolt bolt-tr" aria-hidden />
           <span className="panel-bolt bolt-bl" aria-hidden />

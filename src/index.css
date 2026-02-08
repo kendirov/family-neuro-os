@@ -673,6 +673,50 @@
       0 0 24px rgba(168, 85, 247, 0.3);
   }
 
+  /* Right Panel (Control Core): glow when engine running — cyber-tactical */
+  @keyframes panel-engine-glow {
+    0%, 100% {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 6px 24px rgba(0, 0, 0, 0.5),
+        0 0 0 3px rgba(34, 211, 238, 0.25),
+        0 0 20px rgba(34, 211, 238, 0.35);
+      border-color: rgba(34, 211, 238, 0.5);
+    }
+    50% {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 6px 24px rgba(0, 0, 0, 0.5),
+        0 0 0 3px rgba(34, 211, 238, 0.4),
+        0 0 28px rgba(34, 211, 238, 0.5);
+      border-color: rgba(34, 211, 238, 0.65);
+    }
+  }
+  @keyframes panel-overdrive-glow {
+    0%, 100% {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 6px 24px rgba(0, 0, 0, 0.5),
+        0 0 0 3px rgba(239, 68, 68, 0.4),
+        0 0 22px rgba(239, 68, 68, 0.5);
+      border-color: rgba(248, 113, 113, 0.6);
+    }
+    50% {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 6px 24px rgba(0, 0, 0, 0.5),
+        0 0 0 3px rgba(239, 68, 68, 0.6),
+        0 0 32px rgba(239, 68, 68, 0.6);
+      border-color: rgba(248, 113, 113, 0.85);
+    }
+  }
+  .panel-right-glow-engine {
+    animation: panel-engine-glow 2s ease-in-out infinite;
+  }
+  .panel-right-glow-overdrive {
+    animation: panel-overdrive-glow 1.2s ease-in-out infinite;
+  }
+
   /* Player header: massive gaming name — juicy, pop */
   .hud-player-name {
     font-family: var(--font-gaming);
