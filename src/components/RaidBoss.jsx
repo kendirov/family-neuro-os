@@ -5,9 +5,6 @@ import { cn } from '@/lib/utils'
 
 const RAID_TARGET = 1500
 
-/** 3D Dragon (Flaticon). Alternative: https://cdn-icons-png.flaticon.com/512/1628/1628518.png */
-const BOSS_IMAGE_SRC = 'https://cdn-icons-png.flaticon.com/512/3710/3710290.png'
-
 export function RaidBoss({ isCommander = false }) {
   const raidProgress = useAppStore((s) => s.raidProgress ?? 0)
   const resetRaidProgress = useAppStore((s) => s.resetRaidProgress)
@@ -59,24 +56,37 @@ export function RaidBoss({ isCommander = false }) {
           )}
         </div>
 
-        {/* Boss Arena: cage container + floating dragon image */}
+        {/* Boss Arena: cage + CSS 3D Sushi Boss (no image) */}
         <div className="flex flex-col items-center w-full">
           <div
             className={cn(
               'w-full max-w-[200px] rounded-lg border-2 border-purple-500/30 bg-gradient-to-b from-slate-800 to-slate-900 shadow-inner p-6 flex items-center justify-center'
             )}
           >
-            <img
-              src={BOSS_IMAGE_SRC}
-              alt=""
-              className={cn(
-                'h-32 w-32 object-contain',
-                isTakingDamage && 'animate-boss-damage ring-2 ring-red-500/80',
-                !isTakingDamage && !isWin && 'animate-boss-float'
-              )}
-              width={128}
-              height={128}
-            />
+            <div className="relative h-36 w-36 flex items-center justify-center perspective-[800px]">
+              <div
+                className={cn(
+                  'flex items-center justify-center [transform-style:preserve-3d]',
+                  !isTakingDamage && !isWin && 'animate-boss-float'
+                )}
+                style={{
+                  transform: 'rotateX(25deg) rotateY(-25deg) rotateZ(-5deg)',
+                }}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    'text-[8rem] leading-none',
+                    isTakingDamage && 'animate-boss-damage ring-2 ring-red-500/80'
+                  )}
+                  style={{
+                    filter: 'drop-shadow(10px 15px 15px rgba(0,0,0,0.6))',
+                  }}
+                >
+                  🍣
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* BOSS HP text */}
