@@ -1,5 +1,7 @@
 @import '@fontsource-variable/geist-mono';
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Russo+One&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -9,6 +11,11 @@
   :root {
     --font-geist-mono: 'Geist Mono', 'Courier Prime', ui-monospace, monospace;
     --font-lcd: 'Orbitron', 'Geist Mono', ui-monospace, monospace;
+    --font-blocky: 'Bangers', 'Orbitron', sans-serif;
+    /* Gaming headers (Orbitron / Russo One) */
+    --font-gaming: 'Russo One', 'Orbitron', system-ui, sans-serif;
+    /* Data / body (Inter, Roboto) */
+    --font-sans-data: 'Inter', 'Roboto', system-ui, sans-serif;
     /* Expensive Minimalism: Deep slate/black */
     --background: 222 47% 6%;
     --foreground: 0 0% 98%;
@@ -38,10 +45,27 @@
   }
   body {
     @apply text-white antialiased;
-    font-family: var(--font-geist-mono), 'Geist Mono', ui-monospace, monospace;
+    font-family: var(--font-sans-data);
     font-feature-settings: "tnum";
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
+}
+
+/* Gaming headers: use .font-gaming for ROMA / KIRILL and section titles */
+.font-gaming {
+  font-family: var(--font-gaming);
+  letter-spacing: 0.04em;
+}
+.font-sans-data {
+  font-family: var(--font-sans-data);
+}
+
+/* Juicy: drop-shadow so text and icons pop off dark background */
+.text-pop {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5), 0 0 1px rgba(0, 0, 0, 0.8);
+}
+.icon-pop {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
 }
 
 /* Cyberpunk Arcade: glass + glow utilities */
@@ -66,38 +90,45 @@
     background: radial-gradient(ellipse 120% 80% at 50% 0%, rgb(15 23 42) 0%, rgb(59 7 100) 40%, rgb(15 23 42) 100%);
   }
 
-  /* Turbo Garage: dark blue base + hexagon mesh / carbon fiber */
+  /* Turbo Garage: Dark asphalt / carbon fiber base + radial focus */
   .bg-turbo-garage {
-    background-color: #0a0e1a;
+    background-color: #0c0f14;
     background-image:
-      /* Carbon fiber diagonal lines */
+      /* Carbon fiber weave: diagonal stripes */
       repeating-linear-gradient(
-        125deg,
-        transparent,
-        transparent 2px,
-        rgba(0, 0, 0, 0.25) 2px,
-        rgba(0, 0, 0, 0.25) 3px
+        127deg,
+        transparent 0,
+        transparent 1px,
+        rgba(0, 0, 0, 0.35) 1px,
+        rgba(0, 0, 0, 0.35) 2px
       ),
       repeating-linear-gradient(
-        -35deg,
-        transparent,
-        transparent 2px,
-        rgba(0, 0, 0, 0.2) 2px,
-        rgba(0, 0, 0, 0.2) 3px
+        -37deg,
+        transparent 0,
+        transparent 1px,
+        rgba(0, 0, 0, 0.28) 1px,
+        rgba(0, 0, 0, 0.28) 2px
       ),
-      /* Subtle hexagon mesh (CSS-only approximation via radial dots) */
-      radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.03) 0%, transparent 50%),
-      radial-gradient(circle at 20% 80%, rgba(168, 85, 247, 0.03) 0%, transparent 40%),
-      radial-gradient(circle at 80% 20%, rgba(34, 211, 238, 0.02) 0%, transparent 35%);
-    background-size: 100% 100%, 100% 100%, 120px 104px, 120px 104px, 120px 104px;
-    background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+      /* Dark asphalt grain */
+      radial-gradient(ellipse 100% 100% at 50% 50%, rgba(20, 24, 32, 0.98) 0%, #080a0e 100%);
+    background-size: 100% 100%, 100% 100%, 100% 100%;
+    background-position: 0 0, 0 0, 0 0;
   }
 
-  /* Hexagon pattern overlay (optional stronger mesh) */
+  /* Radial gradient to focus on center (slight vignette + center glow) */
+  .bg-turbo-garage-radial {
+    background: radial-gradient(
+      ellipse 90% 85% at 50% 45%,
+      rgba(34, 211, 238, 0.04) 0%,
+      rgba(168, 85, 247, 0.02) 35%,
+      transparent 60%
+    );
+  }
+
+  /* Carbon fiber / hexagon mesh overlay */
   .bg-turbo-garage-mesh {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='48' viewBox='0 0 56 48'%3E%3Cpath fill='none' stroke='rgba(34,211,238,0.06)' stroke-width='0.5' d='M28 0l28 16v32l-28 16L0 48V16L28 0zm0 8L8 20v24l20 12 20-12V20L28 8z'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='48' viewBox='0 0 56 48'%3E%3Cpath fill='none' stroke='rgba(34,211,238,0.05)' stroke-width='0.5' d='M28 0l28 16v32l-28 16L0 48V16L28 0zm0 8L8 20v24l20 12 20-12V20L28 8z'/%3E%3C/svg%3E");
     background-size: 56px 48px;
-    opacity: 0.9;
   }
 
   @keyframes toast-in {
@@ -172,6 +203,64 @@
   .animate-float-from-avatar {
     animation: float-from-avatar 0.8s ease-out forwards;
     pointer-events: none;
+  }
+
+  /* Float +N / -N from button (cursor position) — Admin juice */
+  @keyframes float-from-button {
+    0% {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -52px) scale(1.2);
+    }
+  }
+  .animate-float-from-button {
+    animation: float-from-button 0.7s ease-out forwards;
+    pointer-events: none;
+  }
+
+  /* Click flash white 100ms — Admin juice */
+  @keyframes btn-flash-white {
+    0% { background-color: rgba(255, 255, 255, 0.7); }
+    100% { background-color: transparent; }
+  }
+  .btn-flash-white-once {
+    animation: btn-flash-white 0.1s ease-out forwards;
+  }
+
+  /* Arcade button physics — only when .btn-arcade-juicy (Admin) */
+  .btn-arcade-juicy {
+    cursor: pointer;
+    transition: all 0.1s ease;
+    border-bottom-width: 4px;
+    box-shadow: 0 4px 0 0 rgba(0, 0, 0, 0.25);
+  }
+  .btn-arcade-juicy:hover:not(:disabled) {
+    filter: brightness(1.1);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 0 rgba(0, 0, 0, 0.2);
+  }
+  .btn-arcade-juicy:active:not(:disabled) {
+    transform: translateY(4px);
+    border-bottom-width: 0;
+    box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.35);
+  }
+  .btn-arcade-juicy-rounded {
+    cursor: pointer;
+    transition: all 0.1s ease;
+    border-bottom-width: 2px;
+    box-shadow: 0 2px 0 0 rgba(0, 0, 0, 0.25);
+  }
+  .btn-arcade-juicy-rounded:hover:not(:disabled) {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+  }
+  .btn-arcade-juicy-rounded:active:not(:disabled) {
+    transform: translateY(1px);
+    border-bottom-width: 1px;
+    box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.3);
   }
 
   /* Fuel tank liquid: wobble/rise when points added */
@@ -324,6 +413,39 @@
     background: rgba(251, 191, 36, 0.35);
   }
 
+  /* Admin juice: Juicy Orange/Amber for Food (override when .btn-juicy-food) */
+  .btn-juicy-food {
+    background: linear-gradient(180deg, rgba(251, 146, 60, 0.5) 0%, rgba(245, 158, 11, 0.4) 50%, rgba(217, 119, 6, 0.45) 100%);
+    border-color: rgba(251, 146, 60, 0.8);
+    color: #ffedd5;
+  }
+  .btn-juicy-food-modifier {
+    background: linear-gradient(180deg, rgba(251, 191, 36, 0.45) 0%, rgba(245, 158, 11, 0.35) 100%);
+    border-color: rgba(251, 146, 60, 0.75);
+    color: #fef3c7;
+  }
+
+  /* Admin juice: Deep Royal Blue for School / Дело */
+  .btn-juicy-royal {
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.5) 0%, rgba(29, 78, 216, 0.4) 50%, rgba(30, 64, 175, 0.5) 100%);
+    border-color: rgba(59, 130, 246, 0.8);
+    color: #dbeafe;
+  }
+
+  /* Admin juice: Danger Red gradient + stripes for Penalty */
+  .btn-juicy-danger {
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba(239, 68, 68, 0.5),
+      rgba(239, 68, 68, 0.5) 4px,
+      rgba(185, 28, 28, 0.45) 4px,
+      rgba(185, 28, 28, 0.45) 8px
+    );
+    border-color: rgba(248, 113, 113, 0.85);
+    color: #fecaca;
+    font-size: 0.65rem;
+  }
+
   /* Slow blinking cursor (timer idle state) */
   @keyframes cursor-blink {
     0%, 45% { opacity: 1; }
@@ -433,6 +555,7 @@
     background: rgba(185, 28, 28, 0.55);
     filter: brightness(1.1);
   }
+  /* When juicy, penalty buttons use .btn-juicy-danger (see above) */
 
   /* Daily base: completed = dimmed glass + bright green check overlay */
   .btn-daily-complete {
@@ -467,6 +590,28 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.2);
   }
 
+  /* БОРТОВОЙ ЖУРНАЛ — Cyberpunk HUD (Admin weekly analytics) */
+  .hud-journal {
+    border-color: rgba(34, 211, 238, 0.2);
+  }
+  .hud-label {
+    letter-spacing: 0.15em;
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
+  }
+  .hud-glow {
+    text-shadow: 0 0 8px rgba(34, 211, 238, 0.6), 0 0 16px rgba(34, 211, 238, 0.3);
+  }
+  .hud-bar-green {
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.9) 0%, rgba(22, 163, 74, 0.85) 100%);
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+    border: 1px solid rgba(34, 197, 94, 0.5);
+  }
+  .hud-bar-red {
+    background: linear-gradient(180deg, rgba(248, 113, 113, 0.9) 0%, rgba(239, 68, 68, 0.85) 100%);
+    box-shadow: 0 0 6px rgba(248, 113, 113, 0.5);
+    border: 1px solid rgba(248, 113, 113, 0.5);
+  }
+
   /* Single-page dashboard: 2-column grid on laptop, stack on mobile */
   .dashboard-grid {
     display: flex;
@@ -484,6 +629,129 @@
       flex: 0 0 40%;
       min-width: 0;
     }
+  }
+
+  /* Juicy HUD panels: rounded-2xl, 3px borders, rich dark blue-grey */
+  .panel-glass {
+    position: relative;
+    border-radius: 1rem; /* 16px — use rounded-2xl in class for 1.5rem */
+    background: linear-gradient(165deg, #1e293b 0%, #0f172a 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 3px solid rgba(100, 116, 139, 0.5);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 6px 24px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(0, 0, 0, 0.3);
+  }
+  /* Roma: Cyan neon — juicy */
+  .panel-glow-roma {
+    border-radius: 1.5rem;
+    border: 3px solid rgba(34, 211, 238, 0.6);
+    background: linear-gradient(165deg, #1e293b 0%, #0f172a 50%, #0c1222 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 6px 24px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(0, 0, 0, 0.3),
+      0 0 0 3px rgba(34, 211, 238, 0.2),
+      0 0 24px rgba(34, 211, 238, 0.25);
+  }
+  /* Kirill: Purple neon — juicy */
+  .panel-glow-kirill {
+    border-radius: 1.5rem;
+    border: 3px solid rgba(168, 85, 247, 0.6);
+    background: linear-gradient(165deg, #1e293b 0%, #0f172a 50%, #0c1222 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 6px 24px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(0, 0, 0, 0.3),
+      0 0 0 3px rgba(168, 85, 247, 0.2),
+      0 0 24px rgba(168, 85, 247, 0.3);
+  }
+
+  /* Player header: massive gaming name — juicy, pop */
+  .hud-player-name {
+    font-family: var(--font-gaming);
+    font-size: clamp(1.75rem, 4vw + 1.25rem, 3rem);
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    line-height: 1.1;
+    text-transform: uppercase;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 1px rgba(0, 0, 0, 0.8);
+  }
+  /* Avatar circle — chunky border */
+  .hud-player-avatar {
+    flex-shrink: 0;
+    width: clamp(2.75rem, 6vw + 1.25rem, 3.75rem);
+    height: clamp(2.75rem, 6vw + 1.25rem, 3.75rem);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-width: 3px;
+  }
+
+  /* Score: Credits — bold wide numbers, pop */
+  .hud-score-total {
+    font-family: var(--font-gaming), var(--font-lcd);
+    font-size: clamp(2rem, 5vw + 1.25rem, 3.5rem);
+    font-weight: 900;
+    color: #fbbf24;
+    text-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.7),
+      0 0 12px rgba(251, 191, 36, 0.6),
+      0 0 24px rgba(245, 158, 11, 0.35);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  /* Earned Today — green, pop */
+  .hud-score-earned {
+    font-family: var(--font-sans-data);
+    font-size: clamp(1rem, 2vw + 0.5rem, 1.25rem);
+    font-weight: 700;
+    color: #34d399;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  }
+  /* Roblox-style 3D stud: chunky block with top highlight and deep bottom shadow */
+  .btn-stud {
+    border-radius: 12px 12px 10px 10px;
+    border-width: 2px;
+    border-bottom-width: 5px;
+    box-shadow:
+      inset 0 2px 0 rgba(255, 255, 255, 0.15),
+      0 5px 0 rgba(0, 0, 0, 0.3),
+      0 6px 8px rgba(0, 0, 0, 0.2);
+    transition: transform 0.1s ease, box-shadow 0.1s ease, border-bottom-width 0.1s ease;
+  }
+  .btn-stud:hover:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 2px 0 rgba(255, 255, 255, 0.12),
+      0 3px 0 rgba(0, 0, 0, 0.3),
+      0 4px 6px rgba(0, 0, 0, 0.2);
+    border-bottom-width: 4px;
+  }
+  .btn-stud:active:not(:disabled) {
+    transform: translateY(4px);
+    border-bottom-width: 1px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 1px 0 rgba(0, 0, 0, 0.35),
+      0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+  .font-blocky {
+    font-family: var(--font-blocky);
+    letter-spacing: 0.02em;
+  }
+  .font-hud-nums {
+    font-family: var(--font-geist-mono);
+    font-feature-settings: "tnum";
   }
 
   /* Metal panel with corner bolts (Turbo Garage) */

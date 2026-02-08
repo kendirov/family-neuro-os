@@ -152,6 +152,11 @@ export function playCoin() {
   playMp3('coin', coinFallback)
 }
 
+/** Chime when a daily mission is completed (placeholder: reuses coin sound). */
+export function playChime() {
+  playMp3('coin', coinFallback)
+}
+
 /** Sci-fi power-up (legacy) */
 export function playStart() {
   playMp3('start', startFallback)
@@ -175,4 +180,41 @@ export function playError() {
 /** Siren once when entering overdrive */
 export function playSiren() {
   playMp3('siren', sirenFallback)
+}
+
+/** Cash register / deduct sound when session finishes */
+function cashRegisterFallback() {
+  try {
+    const ctx = getContext()
+    if (ctx.state === 'suspended') ctx.resume()
+    const now = ctx.currentTime
+    const osc1 = ctx.createOscillator()
+    const gain1 = ctx.createGain()
+    osc1.connect(gain1)
+    gain1.connect(ctx.destination)
+    osc1.type = 'sine'
+    osc1.frequency.setValueAtTime(1200, now)
+    osc1.frequency.setValueAtTime(900, now + 0.08)
+    gain1.gain.setValueAtTime(0, now)
+    gain1.gain.linearRampToValueAtTime(0.12, now + 0.02)
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.12)
+    osc1.start(now)
+    osc1.stop(now + 0.12)
+    const osc2 = ctx.createOscillator()
+    const gain2 = ctx.createGain()
+    osc2.connect(gain2)
+    gain2.connect(ctx.destination)
+    osc2.type = 'sine'
+    osc2.frequency.setValueAtTime(800, now + 0.1)
+    osc2.frequency.setValueAtTime(600, now + 0.18)
+    gain2.gain.setValueAtTime(0, now + 0.1)
+    gain2.gain.linearRampToValueAtTime(0.1, now + 0.12)
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.22)
+    osc2.start(now + 0.1)
+    osc2.stop(now + 0.22)
+  } catch (_) {}
+}
+
+export function playCashRegister() {
+  playMp3('coin', cashRegisterFallback)
 }

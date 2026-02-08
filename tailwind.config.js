@@ -28,6 +28,8 @@ export default {
       },
       fontFamily: {
         mono: ['var(--font-geist-mono)', 'Courier Prime', 'ui-monospace', 'monospace'],
+        gaming: ['var(--font-gaming)', 'Orbitron', 'system-ui', 'sans-serif'],
+        'sans-data': ['var(--font-sans-data)', 'Inter', 'Roboto', 'system-ui', 'sans-serif'],
       },
     },
   },
