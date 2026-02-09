@@ -75,6 +75,7 @@ export const TASK_CONFIG = {
     bonus: [
       { id: 'food_all', emoji: '🍽️', label: 'Съел всё', credits: 10, reason: 'Питание: Съел всё' },
       { id: 'food_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Питание: Вовремя' },
+      { id: 'food_dishes', emoji: '🧽', label: 'Посуда', credits: 10, reason: 'Питание: Посуда' },
     ],
   },
 

@@ -504,7 +504,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
               />
               {/* Row 2: Bonus tags container (below main meal) */}
               {foodBonus.length > 0 && (
-                <div className="flex gap-2 justify-center">
+                <div className="flex gap-1 justify-center">
                   {foodBonus.map((bonus) => {
                     const bonusTask = normalizeTask(bonus, true)
                     return (

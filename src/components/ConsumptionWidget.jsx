@@ -15,9 +15,15 @@ function PilotConsumptionCard({ pilotId, gameMinutes, mediaMinutes }) {
       ? 'text-cyan-300 border-cyan-500/60 shadow-[0_0_12px_rgba(34,211,238,0.3)]'
       : 'text-purple-300 border-purple-500/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
 
-  const gamePercent = Math.min(100, (gameMinutes / GAME_SOFT_LIMIT_MIN) * 100 || 0)
-  const mediaPercent = Math.min(100, (mediaMinutes / MEDIA_SOFT_LIMIT_MIN) * 100 || 0)
+  // Dynamic scale max: ensures bar is ~80% full if usage exceeds limit
+  const gameScaleMax = Math.max(GAME_SOFT_LIMIT_MIN, gameMinutes * 1.2)
+  const mediaScaleMax = Math.max(MEDIA_SOFT_LIMIT_MIN, mediaMinutes * 1.2)
 
+  // Calculate percentage based on dynamic scale
+  const gamePercent = Math.min(100, (gameMinutes / gameScaleMax) * 100 || 0)
+  const mediaPercent = Math.min(100, (mediaMinutes / mediaScaleMax) * 100 || 0)
+
+  // Color logic still based on original thresholds (for visual consistency)
   const gameOverdrive = gameMinutes > GAME_SOFT_LIMIT_MIN
   const mediaOverdrive = mediaMinutes > MEDIA_SOFT_LIMIT_MIN
 
@@ -48,7 +54,7 @@ function PilotConsumptionCard({ pilotId, gameMinutes, mediaMinutes }) {
               gameOverdrive ? 'text-red-400' : 'text-cyan-300'
             )}
           >
-            {gameMinutes} / {GAME_SOFT_LIMIT_MIN} мин
+            {gameMinutes} мин
           </span>
         </div>
         <div className="relative h-2 rounded-full bg-slate-900/90 border border-slate-700/80 overflow-hidden">
@@ -79,7 +85,7 @@ function PilotConsumptionCard({ pilotId, gameMinutes, mediaMinutes }) {
               mediaOverdrive ? 'text-red-400' : 'text-orange-300'
             )}
           >
-            {mediaMinutes} / {MEDIA_SOFT_LIMIT_MIN} мин
+            {mediaMinutes} мин
           </span>
         </div>
         <div className="relative h-2 rounded-full bg-slate-900/90 border border-slate-700/80 overflow-hidden">

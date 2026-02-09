@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Square, Gamepad2, Tv, Play, Pause, Loader2 } from 'lucide-react'
+import { Square, Gamepad2, Tv, Play, Pause, Loader2, Flame } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
 import { playEngineRev, playCashRegister, playError } from '@/lib/sounds'
 import { PilotAvatar } from '@/components/HelmetAvatar'
@@ -162,6 +162,15 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
     }
   }, [currentTime, isMediaMode])
 
+  // Live session burn (XP consumed in current engine session for this pilot)
+  const burnedXP = pilot?.sessionTotalBurned ?? 0
+  const burnedLabel =
+    burnedXP === 0
+      ? '0'
+      : Number.isInteger(burnedXP)
+        ? String(burnedXP)
+        : burnedXP.toFixed(1)
+
   const handleActionButton = async () => {
     // Prevent spamming / double-clicks while a previous action is in flight
     if (isStarting) return
@@ -217,7 +226,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
   return (
     <motion.div
       className={cn(
-        'relative rounded-2xl border-[3px] bg-slate-800/95 p-6 overflow-hidden transition-all duration-300 flex flex-col',
+        'relative rounded-2xl border-[3px] bg-slate-800/95 p-4 overflow-hidden transition-all duration-300 flex flex-col gap-3',
         isRunning && glowClass,
         isRunning && bgGlow,
         !isRunning && 'border-slate-600/70'
@@ -232,20 +241,20 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
       )}
 
       {/* Header: pixel art avatar + name */}
-      <div className={cn('flex items-center gap-3 mb-4', textClass)}>
+      <div className={cn('flex items-center gap-2', textClass)}>
         <PilotAvatar pilotId={id} size="engine" />
         <span className="font-gaming text-base font-bold uppercase tracking-wider">{name}</span>
       </div>
 
       {/* Mode Switcher: Top (only changeable when idle) */}
-      <div className="mb-6">
-        <div className="flex gap-2 rounded-xl border-2 border-slate-600/60 bg-slate-900/50 p-1">
+      <div className="mt-1">
+        <div className="flex gap-1.5 rounded-xl border-2 border-slate-600/60 bg-slate-900/60 p-1">
           <button
             type="button"
             onClick={() => handleModeChange('game')}
             disabled={isRunning || isPaused}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-gaming text-xs font-bold uppercase transition-all touch-manipulation',
+              'flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg font-gaming text-[11px] font-bold uppercase transition-all touch-manipulation',
               effectiveMode === 'game'
                 ? 'bg-cyan-500/25 border-2 border-cyan-500/60 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.3)]'
                 : 'text-slate-400 hover:text-slate-300 border-2 border-transparent',
@@ -262,7 +271,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
             onClick={() => handleModeChange('youtube')}
             disabled={isRunning || isPaused}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-gaming text-xs font-bold uppercase transition-all touch-manipulation',
+              'flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg font-gaming text-[11px] font-bold uppercase transition-all touch-manipulation',
               isMediaMode
                 ? 'bg-orange-500/25 border-2 border-orange-500/60 text-orange-300 shadow-[0_0_10px_rgba(251,146,60,0.3)]'
                 : 'text-slate-400 hover:text-slate-300 border-2 border-transparent',
@@ -277,20 +286,27 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
         </div>
       </div>
 
-      {/* Center: Huge Time Display */}
-      <div className="flex flex-col items-center justify-center mb-6 flex-1 min-h-[120px]">
+      {/* Center: Time Display + burn indicator + primary controls (compact stack) */}
+      <div className="flex flex-col items-center justify-center flex-1 min-h-[96px] gap-1.5">
         <motion.div
           className={cn(
-            'font-mono text-5xl sm:text-6xl font-black tabular-nums text-center transition-all duration-300',
+            'font-mono text-4xl sm:text-5xl font-black tabular-nums text-center transition-all duration-300',
             (isRunning || isPaused) ? timelineZone.timerGlow : 'text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.5)]'
           )}
         >
           {formatElapsed(Math.max(0, Math.floor(elapsedSeconds)))}
         </motion.div>
+        {/* Real-time fuel burn indicator (XP consumed this session) */}
+        {(isRunning || isPaused) && burnedXP > 0 && (
+          <div className="flex items-center gap-1 font-mono text-xs text-orange-400 opacity-80 animate-pulse">
+            <Flame className="w-3.5 h-3.5" strokeWidth={2.5} />
+            <span>-{burnedLabel} XP</span>
+          </div>
+        )}
         
         {/* Cost Display */}
         {(isRunning || isPaused) && (
-          <div className="mt-2 text-center">
+          <div className="mt-1 text-center">
             <span className={cn(
               'font-mono text-xs font-bold uppercase tracking-wider',
               timelineZone.isGreenZone ? 'text-green-400' : 'text-orange-400'
@@ -303,7 +319,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
 
       {/* Visual Timeline Bar: Below Time Display */}
       {(isRunning || isPaused) && isMediaMode && (
-        <div className="mb-6">
+        <div className="mb-3">
           <div className="relative h-12 rounded-xl border-2 border-slate-600/60 bg-slate-900/80 overflow-hidden">
             {/* Green Zone (0-20 mins): БОНУС */}
             <div 
@@ -355,7 +371,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
       
       {/* Simplified timeline for Game mode */}
       {(isRunning || isPaused) && !isMediaMode && (
-        <div className="mb-6">
+        <div className="mb-3">
           <div className="relative h-8 rounded-xl border-2 border-slate-600/60 bg-slate-900/80 overflow-hidden">
             {/* Cyan fill for game mode */}
             <motion.div
@@ -378,15 +394,15 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
         </div>
       )}
 
-      {/* Controls: Bottom - Primary Button (Center, Huge, Round) + Stop Button (Right, Small) */}
-      <div className="flex items-center justify-center gap-4 mt-auto">
+      {/* Controls: Primary Button + Stop Button (tight row) */}
+      <div className="flex items-center justify-center gap-3 mt-1">
         {/* Primary Button: Huge Round Play/Pause */}
         <motion.button
           type="button"
           onClick={handleActionButton}
           disabled={(isIdle && !canStart) || isStarting}
           className={cn(
-            'relative w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 transition-all touch-manipulation flex items-center justify-center shadow-2xl',
+            'relative w-16 h-16 sm:w-20 sm:h-20 rounded-full border-[3px] transition-all touch-manipulation flex items-center justify-center shadow-2xl',
             isIdle && !canStart && 'cursor-not-allowed border-slate-600 bg-slate-700/80',
             // Старт / Продолжить — всегда яркая, сочная кнопка
             (isIdle && canStart) && 'bg-gradient-to-br from-emerald-500 to-blue-500 border-emerald-400/80 hover:scale-105 active:scale-95 animate-pulse',
@@ -398,16 +414,16 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
           whileHover={(isIdle && canStart && !isStarting) || !isIdle ? { scale: 1.05 } : undefined}
           whileTap={(isIdle && canStart && !isStarting) || !isIdle ? { scale: 0.95 } : undefined}
           aria-label={isIdle ? 'Старт' : isRunning ? 'Пауза' : 'Продолжить'}
-        >
+          >
           {isStarting ? (
-            <Loader2 className="w-10 h-10 text-white animate-spin" strokeWidth={3} />
+            <Loader2 className="w-8 h-8 text-white animate-spin" strokeWidth={3} />
           ) : isIdle ? (
-            <Play className="w-10 h-10 sm:w-12 sm:h-12 text-white ml-1" strokeWidth={3} fill="currentColor" />
+            <Play className="w-9 h-9 sm:w-10 sm:h-10 text-white ml-0.5" strokeWidth={3} fill="currentColor" />
           ) : isRunning ? (
-            <Pause className="w-10 h-10 sm:w-12 sm:h-12 text-white" strokeWidth={3} fill="currentColor" />
+            <Pause className="w-9 h-9 sm:w-10 sm:h-10 text-white" strokeWidth={3} fill="currentColor" />
           ) : (
             // Paused state: show Play icon, label says "Продолжить"
-            <Play className="w-10 h-10 sm:w-12 sm:h-12 text-white ml-1" strokeWidth={3} fill="currentColor" />
+            <Play className="w-9 h-9 sm:w-10 sm:h-10 text-white ml-0.5" strokeWidth={3} fill="currentColor" />
           )}
         </motion.button>
 
@@ -417,7 +433,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
           onClick={handleStop}
           disabled={isIdle}
           className={cn(
-            'w-12 h-12 sm:w-14 sm:h-14 rounded-full border-2 flex items-center justify-center transition-all touch-manipulation shadow-lg',
+            'w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center transition-all touch-manipulation shadow-lg',
             isIdle
               ? 'opacity-40 cursor-not-allowed border-slate-600 bg-slate-700/30 text-slate-500'
               : 'border-red-500/80 bg-gradient-to-br from-red-500/20 to-red-600/20 text-red-200 hover:bg-red-500/30 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(239,68,68,0.3)]'

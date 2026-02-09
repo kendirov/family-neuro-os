@@ -523,7 +523,7 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
     users.find((u) => u.id === 'roma')?.balance >= 1 && users.find((u) => u.id === 'kirill')?.balance >= 1
 
   return (
-    <div className="rounded-2xl border-[3px] border-slate-600 bg-slate-800/95 p-4 sm:p-5 shrink-0 flex flex-col gap-4 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
+    <div className="rounded-2xl border-[3px] border-slate-600 bg-slate-800/95 p-3 sm:p-4 shrink-0 flex flex-col gap-3 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
       {/* Wheel of Fortune — banner always clickable; opens wheel or pilot selector */}
       {typeof setWheelOpen === 'function' && (
         <WheelBanner
@@ -538,9 +538,9 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
       </h3>
 
       {/* Master controls: Large mode toggles + ЗАПУСТИТЬ ОБОИХ (зелёный) + ПАУЗА ВСЕМ (жёлтый) */}
-      <div className="flex flex-col gap-3 py-2 border-b border-slate-600/60">
-        {/* Large Mode Toggles: Games vs Media */}
-        <div className="flex gap-3">
+      <div className="flex flex-col gap-2.5 py-2 border-b border-slate-600/60">
+        {/* Large Mode Toggles: Games vs Media (sliding pill) */}
+        <div className="relative rounded-2xl border-[3px] border-slate-600/70 bg-slate-900/80 p-1 flex gap-1">
           {MODE_GROUPS.map((group) => {
             const Icon = group.Icon
             const isGameGroup = group.id === 'game'
@@ -550,7 +550,7 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
               : isMediaGroup
                 ? mode === 'youtube' || mode === 'good'
                 : false
-            
+
             return (
               <button
                 key={group.id}
@@ -564,20 +564,29 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
                   }
                 }}
                 className={cn(
-                  'flex-1 min-h-[56px] px-4 rounded-xl border-[3px] font-gaming text-sm font-bold uppercase transition-all touch-manipulation flex items-center justify-center gap-2',
-                  isGameGroup &&
-                    (isSelected
-                      ? 'border-blue-500 bg-blue-500/25 text-blue-300 shadow-[0_0_20px_rgba(59,130,246,0.3)]'
-                      : 'border-slate-600 bg-slate-700/50 text-slate-400 hover:border-slate-500'),
-                  isMediaGroup &&
-                    (isSelected
-                      ? 'border-orange-500 bg-gradient-to-br from-orange-500/25 to-amber-500/25 text-orange-300 shadow-[0_0_20px_rgba(251,146,60,0.3)]'
-                      : 'border-slate-600 bg-slate-700/50 text-slate-400 hover:border-slate-500')
+                  'relative flex-1 min-h-[44px] rounded-xl font-gaming text-[11px] font-bold uppercase transition-all touch-manipulation flex items-center justify-center gap-1.5 overflow-hidden',
+                  'text-slate-400'
                 )}
               >
-                <Icon className="h-6 w-6" strokeWidth={2.5} />
-                <span className="text-lg">{group.emoji}</span>
-                <span>{group.label}</span>
+                {isSelected && (
+                  <motion.div
+                    layoutId="engineModeActiveTab"
+                    className={cn(
+                      'absolute inset-0 rounded-xl',
+                      isGameGroup
+                        ? 'bg-gradient-to-br from-blue-500/40 to-cyan-500/40 shadow-[0_0_18px_rgba(59,130,246,0.5)]'
+                        : 'bg-gradient-to-br from-orange-500/40 to-amber-500/40 shadow-[0_0_18px_rgba(251,146,60,0.5)]'
+                    )}
+                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  />
+                )}
+                <span className={cn('relative z-10 flex items-center gap-1.5', isSelected && 'text-white')}>
+                  <Icon className="h-5 w-5" strokeWidth={2.4} />
+                  <span aria-hidden className="text-base">
+                    {group.emoji}
+                  </span>
+                  <span>{group.label}</span>
+                </span>
               </button>
             )
           })}
@@ -585,12 +594,12 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         
         {/* Sub-mode selector for Media (only shown when media is selected) */}
         {(mode === 'youtube' || mode === 'good') && (
-          <div className="flex gap-2 justify-center">
+          <div className="flex gap-1.5 justify-center">
             <button
               type="button"
               onClick={() => setMode('youtube')}
               className={cn(
-                'min-h-[36px] px-3 rounded-lg border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
+                'min-h-[32px] px-2.5 rounded-lg border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
                 mode === 'youtube'
                   ? 'border-pink-500 bg-pink-500/25 text-pink-300'
                   : 'border-slate-600 text-slate-400 hover:border-slate-500'
@@ -603,7 +612,7 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
               type="button"
               onClick={() => setMode('good')}
               className={cn(
-                'min-h-[36px] px-3 rounded-lg border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
+                'min-h-[32px] px-2.5 rounded-lg border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
                 mode === 'good'
                   ? 'border-emerald-500 bg-emerald-500/25 text-emerald-200'
                   : 'border-slate-600 text-slate-400 hover:border-slate-500'
@@ -616,13 +625,13 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         )}
         
         {/* Action buttons */}
-        <div className="flex gap-2 flex-1 min-w-0 justify-end">
+        <div className="flex gap-1.5 flex-1 min-w-0 justify-end">
           <motion.button
             type="button"
             onClick={startBoth}
             disabled={!bothCanStart}
             className={cn(
-              'min-h-[40px] px-3 sm:px-4 rounded-xl border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation',
+              'min-h-[36px] px-3 rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
               bothCanStart
                 ? 'border-emerald-500/80 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
                 : 'border-slate-600 text-slate-500 opacity-60 cursor-not-allowed'
@@ -635,7 +644,7 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
             onClick={pauseAll}
             disabled={!anyRunning}
             className={cn(
-              'min-h-[40px] px-3 sm:px-4 rounded-xl border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation',
+              'min-h-[36px] px-3 rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
               anyRunning
                 ? 'border-amber-500/80 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
                 : 'border-slate-600 text-slate-500 opacity-60 cursor-not-allowed'
@@ -647,13 +656,13 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
       </div>
 
       {/* Visual Burn Rate Timeline for each pilot */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-1.5">
         <BurnTimeline pilotId="kirill" mode={mode} />
         <BurnTimeline pilotId="roma" mode={mode} />
       </div>
 
       {/* Dual cockpit: two pilot cards - Kirill LEFT, Roma RIGHT */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 min-h-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 flex-1 min-h-0">
         <PilotEngine
           id="kirill"
           elapsedSeconds={kirillElapsedSeconds}

@@ -144,9 +144,14 @@ function GodModeCommandBar({ roma, kirill, onShowToast, disabled }) {
   )
 }
 
-function formatTime(ts) {
+function formatTime(ts, includeSeconds = true) {
   const d = new Date(ts)
-  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  return d.toLocaleTimeString('ru-RU', { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    ...(includeSeconds ? { second: '2-digit' } : {}), 
+    hour12: false 
+  })
 }
 
 function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isCommander, transactions = [], onRemoveTransaction }) {
@@ -165,6 +170,48 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
   const [showTransactionModal, setShowTransactionModal] = useState(false)
 
   const personalLog = (transactions ?? []).filter((t) => t.userId === user.id).slice(0, 50)
+
+  /** Generate daily summary based on completed tasks today */
+  const getDailySummary = () => {
+    const todayStart = getTodayStartTs()
+    const todayEnd = todayStart + 24 * 60 * 60 * 1000
+    const todayTransactions = (transactions ?? []).filter(
+      (t) => t.userId === user.id && t.at >= todayStart && t.at < todayEnd && t.type !== 'burn'
+    )
+    
+    const parts = []
+    
+    // Check if all 3 meals are done
+    const breakfastDone = isDailyBaseComplete(user.id, 'breakfast')
+    const lunchDone = isDailyBaseComplete(user.id, 'lunch')
+    const dinnerDone = isDailyBaseComplete(user.id, 'dinner')
+    if (breakfastDone && lunchDone && dinnerDone) {
+      parts.push('Сытый')
+    }
+    
+    // Check if school tasks are done (at least one)
+    const schoolLeaveDone = isDailyBaseComplete(user.id, 'school_leave')
+    const packBagDone = isDailyBaseComplete(user.id, 'pack_bag')
+    if (schoolLeaveDone || packBagDone) {
+      parts.push('Ученик')
+    }
+    
+    // Check if help tasks are done (at least one)
+    const helpCleanDone = isDailyBaseComplete(user.id, 'help_clean')
+    const takeTrashDone = isDailyBaseComplete(user.id, 'take_trash')
+    const goStoreDone = isDailyBaseComplete(user.id, 'go_store')
+    if (helpCleanDone || takeTrashDone || goStoreDone) {
+      parts.push('Помощник')
+    }
+    
+    // Check if there are any penalties (negative transactions)
+    const hasPenalty = todayTransactions.some((t) => t.amount < 0)
+    if (hasPenalty) {
+      parts.push('Хулиганил')
+    }
+    
+    return parts.length > 0 ? parts.join(' • ') : ''
+  }
 
   const todayKey = new Date().toISOString().slice(0, 10)
   const yesterday = new Date()
@@ -343,6 +390,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
           )
           .reduce((sum, t) => sum + t.amount, 0)
         const todayEarnedLabel = `${todayEarned >= 0 ? '+' : ''}${todayEarned}`
+        const dailySummary = getDailySummary()
         return (
           <div className="mb-3 shrink-0 rounded-2xl border-[3px] border-slate-500/70 bg-slate-800/90 px-4 py-4 shadow-[0_4px_16px_rgba(0,0,0,0.6)] relative z-10">
             <div className="flex flex-col gap-2">
@@ -354,6 +402,11 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
                   {todayEarnedLabel}
                 </span>
                 <span className="font-sans-data text-[10px] text-amber-300 font-semibold">⚡ XP</span>
+                {dailySummary && (
+                  <span className="font-mono text-[10px] text-slate-500 opacity-60 italic mt-1">
+                    {dailySummary}
+                  </span>
+                )}
               </div>
               <div className="h-px w-full bg-slate-500/50 rounded-full" aria-hidden />
               <div className="flex items-center justify-between w-full">
@@ -382,7 +435,11 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
               (MISSION_TASKS_BY_CATEGORY.Base ?? []).some((t) => t.id === taskId) ||
               (MISSION_TASKS_BY_CATEGORY.foodComposite ?? []).some(
                 (g) => g.main.id === taskId || (g.modifiers ?? []).some((m) => m.id === taskId)
-              )
+              ) ||
+              // School routine tasks (daily): school_leave, pack_bag
+              (taskId === 'school_leave' || taskId === 'pack_bag') ||
+              // Nutrition bonus tasks (daily): food_all, food_ontime, food_dishes
+              (taskId === 'food_all' || taskId === 'food_ontime' || taskId === 'food_dishes')
             if (!isDaily) return 'pending'
             return isDailyBaseComplete(user.id, taskId) ? 'completed' : 'pending'
           }}
@@ -421,22 +478,28 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         </div>
       </div>
 
-      {/* Transaction History — last 50, terminal style, delete with refund */}
-      <div className="mt-3 flex-1 flex flex-col rounded-2xl border-2 border-slate-500/70 bg-slate-800/90 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.5)] min-h-[400px] relative z-10">
-        <h3 className="font-mono text-xs text-white uppercase tracking-wider px-3 py-2 border-b border-slate-600/60 shrink-0 font-bold">
-          Журнал операций
-        </h3>
-        <ul className="font-mono text-[11px] text-white space-y-0 overflow-y-auto flex-1 min-h-0 max-h-60 px-2 py-1.5 list-none [scrollbar-color:theme(colors.slate.600)_transparent]">
-          {personalLog.length === 0 ? (
-            <li className="text-slate-300 py-3">— записей нет</li>
-          ) : (
-            orderedDateKeys.map((dateKey) => (
-              <li key={dateKey} className="list-none">
-                <div className="sticky top-0 z-10 bg-slate-800/98 py-1 font-mono text-[10px] text-white uppercase tracking-wider border-b border-slate-600/50 font-semibold">
-                  {dateLabel(dateKey)}
-                </div>
+      {/* Transaction History — Admin mode: expanded list for today's transactions */}
+      {isCommander ? (
+        <div className="mt-3 flex flex-col rounded-2xl border-2 border-slate-500/70 bg-slate-800/90 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.5)] h-auto relative z-10">
+          <h3 className="font-mono text-sm text-white uppercase tracking-wider px-4 py-3 border-b border-slate-600/60 shrink-0 font-bold">
+            Журнал операций — Сегодня
+          </h3>
+          <div className="h-64 overflow-y-auto [scrollbar-color:theme(colors.slate.600)_transparent]">
+            {(() => {
+              const todayTransactions = personalLog.filter((t) => {
+                const txDate = t.at ? new Date(t.at).toISOString().slice(0, 10) : todayKey
+                return txDate === todayKey
+              })
+              
+              if (todayTransactions.length === 0) {
+                return (
+                  <div className="text-slate-400 py-8 text-center text-sm">— записей за сегодня нет</div>
+                )
+              }
+              
+              return (
                 <ul className="list-none space-y-0">
-                  {groupedByDate[dateKey].map((t, i) => {
+                  {todayTransactions.map((t, i) => {
                     const isEarn = t.amount > 0
                     const hasId = !!t.id && !String(t.id).startsWith('temp-')
                     const handleDelete = () => {
@@ -448,40 +511,108 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
                     return (
                       <li
                         key={t.id ?? `log-${t.at}-${i}`}
-                        className="flex items-center gap-2 py-1.5 px-1.5 rounded hover:bg-slate-700/60 group border-b border-slate-600/40 last:border-b-0"
+                        className={cn(
+                          'flex items-center gap-3 py-3 px-4 border-b border-slate-600/30',
+                          i % 2 === 0 ? 'bg-slate-800/50' : 'bg-white/5'
+                        )}
                       >
-                        <span className="tabular-nums text-white shrink-0 w-14 text-[10px] font-medium">
-                          {formatTime(t.at)}
+                        {/* Time - Left */}
+                        <span className="tabular-nums text-slate-400 shrink-0 w-16 text-sm font-medium">
+                          {formatTime(t.at, false)}
                         </span>
-                        <span className="flex-1 truncate text-white min-w-0 text-[11px]">{t.description}</span>
+                        {/* Description - Center */}
+                        <span className="flex-1 text-white min-w-0 text-sm">{t.description}</span>
+                        {/* Amount - Right */}
                         <span
                           className={cn(
-                            'tabular-nums shrink-0 w-10 text-right text-xs font-semibold',
+                            'tabular-nums shrink-0 w-16 text-right text-sm font-semibold',
                             isEarn ? 'text-emerald-400' : 'text-red-400'
                           )}
                         >
                           {isEarn ? `+${t.amount}` : t.amount}
                         </span>
-                        {hasId && isCommander && (
+                        {/* Delete Button - Far Right */}
+                        {hasId && (
                           <button
                             type="button"
                             onClick={handleDelete}
-                            className="shrink-0 p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/20 transition opacity-60 group-hover:opacity-100"
+                            className="shrink-0 p-2.5 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-400 hover:text-red-300 transition touch-manipulation border border-red-500/30 hover:border-red-400/50"
                             aria-label="Удалить и вернуть XP"
                             title={isEarn ? 'Удалить и списать XP' : 'Удалить и вернуть XP'}
                           >
-                            <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                            <Trash2 className="h-4 w-4" strokeWidth={2.5} />
                           </button>
                         )}
                       </li>
                     )
                   })}
                 </ul>
-              </li>
-            ))
-          )}
-        </ul>
-      </div>
+              )
+            })()}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex-1 flex flex-col rounded-2xl border-2 border-slate-500/70 bg-slate-800/90 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.5)] min-h-[400px] relative z-10">
+          <h3 className="font-mono text-xs text-white uppercase tracking-wider px-3 py-2 border-b border-slate-600/60 shrink-0 font-bold">
+            Журнал операций
+          </h3>
+          <ul className="font-mono text-[11px] text-white space-y-0 overflow-y-auto flex-1 min-h-0 max-h-60 px-2 py-1.5 list-none [scrollbar-color:theme(colors.slate.600)_transparent]">
+            {personalLog.length === 0 ? (
+              <li className="text-slate-300 py-3">— записей нет</li>
+            ) : (
+              orderedDateKeys.map((dateKey) => (
+                <li key={dateKey} className="list-none">
+                  <div className="sticky top-0 z-10 bg-slate-800/98 py-1 font-mono text-[10px] text-white uppercase tracking-wider border-b border-slate-600/50 font-semibold">
+                    {dateLabel(dateKey)}
+                  </div>
+                  <ul className="list-none space-y-0">
+                    {groupedByDate[dateKey].map((t, i) => {
+                      const isEarn = t.amount > 0
+                      const hasId = !!t.id && !String(t.id).startsWith('temp-')
+                      const handleDelete = () => {
+                        const msg = isEarn
+                          ? `Удалить запись (+${t.amount} XP) и списать ${t.amount} XP?`
+                          : `Удалить запись (${t.amount} XP) и вернуть ${Math.abs(t.amount)} XP?`
+                        if (window.confirm(msg)) onRemoveTransaction?.(t.id)
+                      }
+                      return (
+                        <li
+                          key={t.id ?? `log-${t.at}-${i}`}
+                          className="flex items-center gap-2 py-1.5 px-1.5 rounded hover:bg-slate-700/60 group border-b border-slate-600/40 last:border-b-0"
+                        >
+                          <span className="tabular-nums text-white shrink-0 w-14 text-[10px] font-medium">
+                            {formatTime(t.at)}
+                          </span>
+                          <span className="flex-1 truncate text-white min-w-0 text-[11px]">{t.description}</span>
+                          <span
+                            className={cn(
+                              'tabular-nums shrink-0 w-10 text-right text-xs font-semibold',
+                              isEarn ? 'text-emerald-400' : 'text-red-400'
+                            )}
+                          >
+                            {isEarn ? `+${t.amount}` : t.amount}
+                          </span>
+                          {hasId && isCommander && (
+                            <button
+                              type="button"
+                              onClick={handleDelete}
+                              className="shrink-0 p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/20 transition opacity-60 group-hover:opacity-100"
+                              aria-label="Удалить и вернуть XP"
+                              title={isEarn ? 'Удалить и списать XP' : 'Удалить и вернуть XP'}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                            </button>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
 
       {/* Float +N / -N from button (Admin juice) */}
       {floatPop &&
