@@ -93,6 +93,9 @@ export const useAppStore = create((set, get) => ({
   purchases: [],
   isLoading: true,
 
+  /** Realtime status for multi-device sync (profiles channel). */
+  realtimeStatus: 'idle', // 'idle' | 'connecting' | 'connected' | 'error'
+
   /** Wheel of Fortune: last spins (global history). */
   spinHistory: [],
 
@@ -970,19 +973,25 @@ export const useAppStore = create((set, get) => ({
         const lastBurnAt = row.last_burn_at ?? null
         const sessionMode = row.session_mode ?? 'game'
 
-        // If timer_status is idle, initialize empty state
+        // If timer_status is idle and no session, initialize empty state
         if (timerStatus === 'idle' && !sessionStartAt) {
           nextPilots[pilotId] = { ...initialPilotState() }
           continue
         }
+        
+        // CRITICAL: Even if sessionStartAt is missing but timer is running/paused,
+        // we need to sync the timer state from timer_status/timer_start_at
+        // This ensures Device B gets correct state even if session_start_at is null
         
         // Map timer_mode back to session mode for compatibility
         const effectiveMode = timerMode === 'cartoon' 
           ? (sessionMode === 'good' ? 'good' : 'youtube')
           : (sessionMode === 'game' ? 'game' : sessionMode)
 
-        const startMs = new Date(sessionStartAt).getTime()
-        const actualElapsedMinutes = (now - startMs) / 60000
+        // Use timer_start_at if available, otherwise session_start_at
+        const effectiveStartAt = timerStartAt ?? sessionStartAt
+        const startMs = effectiveStartAt ? new Date(effectiveStartAt).getTime() : now
+        const actualElapsedMinutes = effectiveStartAt ? (now - startMs) / 60000 : 0
         const sessionMinutes = Math.floor(actualElapsedMinutes)
 
         const user = get().users.find((x) => x.id === pilotId)
@@ -1028,10 +1037,8 @@ export const useAppStore = create((set, get) => ({
           : timerStatus === 'paused' ? 'PAUSED' 
           : 'IDLE'
         
-        // Use timer_start_at if available, otherwise fall back to session_start_at
-        const effectiveStartAt = timerStartAt ?? sessionStartAt
-        
         // CRITICAL: Calculate elapsed time immediately for running timers (cold-start fix)
+        // Note: effectiveStartAt already declared above
         // This ensures Device B shows correct time immediately on page load
         let calculatedElapsed = 0
         if (timerStatus === 'running' && timerStartAt) {
@@ -1232,6 +1239,9 @@ export const useAppStore = create((set, get) => ({
     // This ensures Device B shows correct time (e.g., 05:43) on cold start
     const calculatedElapsed = get().calculateElapsedFromProfile(profileRow)
     
+    // Calculate sessionMinutes from elapsed seconds for UI display
+    const sessionMinutes = Math.floor(calculatedElapsed / 60)
+    
     // Update local state immediately (triggers UI re-render)
     set((s) => {
       const currentPilot = s.pilots?.[pilotId]
@@ -1246,6 +1256,7 @@ export const useAppStore = create((set, get) => ({
             burnerActive: pilotStatus === 'RUNNING',
             mode: pilotStatus !== 'IDLE' ? sessionMode : (currentPilot?.mode ?? null),
             sessionStartAt: timerStartAt ?? currentPilot?.sessionStartAt ?? null,
+            sessionMinutes, // Update session minutes from calculated elapsed
             timerStatus, // Server-authoritative timer status
             timerStartAt, // Server timestamp when current segment started
             secondsToday: secondsToday, // Accumulated seconds (excluding current run)
@@ -1270,6 +1281,9 @@ export const useAppStore = create((set, get) => ({
    */
   subscribeToRealtime: () => {
     const syncTimerStateFromProfile = get().syncTimerStateFromProfile
+
+    // Mark as connecting so UI can show small sync indicator
+    set({ realtimeStatus: 'connecting' })
 
     const channel = supabase
       .channel('public:profiles')
@@ -1321,17 +1335,47 @@ export const useAppStore = create((set, get) => ({
           syncTimerStateFromProfile(row)
         }
       )
-      .subscribe((status) => {
+      .subscribe(async (status, err) => {
+        console.log('[Realtime] Channel status:', status, err)
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] Subscribed to public.profiles updates')
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[Realtime] Supabase realtime channel error for public.profiles')
+          console.log('[Realtime] ✅ Subscribed to public.profiles updates')
+          set({ realtimeStatus: 'connected' })
+          
+          // CRITICAL: Immediately sync current timer state from DB after subscription
+          // This ensures Device B gets correct state right away, not just future updates
+          try {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('*')
+              .in('id', PILOT_IDS)
+            
+            if (profiles) {
+              profiles.forEach((profile) => {
+                if (PILOT_IDS.includes(profile.id)) {
+                  syncTimerStateFromProfile(profile)
+                }
+              })
+              console.log('[Realtime] ✅ Synced current timer state from DB')
+            }
+          } catch (syncErr) {
+            console.error('[Realtime] Failed to sync current state:', syncErr)
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || err) {
+          console.error('[Realtime] ❌ Channel error:', status, err)
+          set({ realtimeStatus: 'error' })
+        } else if (status === 'CLOSED') {
+          console.log('[Realtime] Channel closed')
+          set({ realtimeStatus: 'idle' })
+        } else {
+          // Other statuses like 'JOINING', 'JOINED' - keep as connecting
+          console.log('[Realtime] Channel status:', status)
         }
       })
 
     // Expose cleanup to callers (Dashboard/App)
     return () => {
       supabase.removeChannel(channel)
+      set({ realtimeStatus: 'idle' })
     }
   },
 

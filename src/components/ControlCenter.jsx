@@ -522,6 +522,27 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
   const bothCanStart =
     users.find((u) => u.id === 'roma')?.balance >= 1 && users.find((u) => u.id === 'kirill')?.balance >= 1
 
+  // Small realtime sync indicator (multi-device timer sync)
+  const realtimeStatus = useAppStore((s) => s.realtimeStatus)
+
+  let syncLabel = 'Оффлайн'
+  let syncClasses = 'border-slate-600 text-slate-500'
+  let dotClasses = 'bg-slate-500'
+
+  if (realtimeStatus === 'connecting') {
+    syncLabel = 'Синхронизация...'
+    syncClasses = 'border-amber-500/60 text-amber-300'
+    dotClasses = 'bg-amber-400 animate-pulse'
+  } else if (realtimeStatus === 'connected') {
+    syncLabel = 'Синхронизировано'
+    syncClasses = 'border-emerald-500/60 text-emerald-300'
+    dotClasses = 'bg-emerald-400'
+  } else if (realtimeStatus === 'error') {
+    syncLabel = 'Нет связи'
+    syncClasses = 'border-red-500/70 text-red-300'
+    dotClasses = 'bg-red-500 animate-pulse'
+  }
+
   return (
     <div className="rounded-2xl border-[3px] border-slate-600 bg-slate-800/95 p-3 sm:p-4 shrink-0 flex flex-col gap-3 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
       {/* Wheel of Fortune — banner always clickable; opens wheel or pilot selector */}
@@ -533,9 +554,21 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         />
       )}
 
-      <h3 className="font-gaming text-xs text-slate-400 uppercase tracking-wider">
-        Двигатель сгорания
-      </h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-gaming text-xs text-slate-400 uppercase tracking-wider">
+          Двигатель сгорания
+        </h3>
+        <div
+          className={cn(
+            'flex items-center gap-1.5 rounded-full px-2 py-0.5 border text-[9px] font-mono uppercase tracking-wider',
+            'bg-slate-900/70',
+            syncClasses
+          )}
+        >
+          <span className={cn('w-1.5 h-1.5 rounded-full', dotClasses)} />
+          <span>{syncLabel}</span>
+        </div>
+      </div>
 
       {/* Master controls: Large mode toggles + ЗАПУСТИТЬ ОБОИХ (зелёный) + ПАУЗА ВСЕМ (жёлтый) */}
       <div className="flex flex-col gap-2.5 py-2 border-b border-slate-600/60">
