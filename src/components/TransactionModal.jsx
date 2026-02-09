@@ -29,6 +29,7 @@ export function TransactionModal({ user, transactions = [], onClose, onShowToast
 
   const [display, setDisplay] = useState('')
   const [exiting, setExiting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const value = parseInt(display, 10)
   const numericValue = Number.isNaN(value) ? 0 : value
@@ -48,19 +49,30 @@ export function TransactionModal({ user, transactions = [], onClose, onShowToast
   }
 
   const handleAdd = () => {
-    if (absValue <= 0) return
+    if (absValue <= 0 || isSubmitting) return
+    setIsSubmitting(true)
     addPoints(user.id, absValue, REASON_BONUS)
     playCoin()
     onShowToast?.({ message: `+${absValue} — ${user.name ?? user.id}`, variant: 'success' })
     clear()
+    // Небольшой debounce + плавное закрытие, чтобы избежать двойных тапов.
+    setTimeout(() => {
+      setIsSubmitting(false)
+      setExiting(true)
+    }, 500)
   }
 
   const handleFine = () => {
-    if (absValue <= 0) return
+    if (absValue <= 0 || isSubmitting) return
+    setIsSubmitting(true)
     spendPoints(user.id, absValue, REASON_FINE)
     playError()
     onShowToast?.({ message: `−${absValue} — ${user.name ?? user.id}`, variant: 'alert' })
     clear()
+    setTimeout(() => {
+      setIsSubmitting(false)
+      setExiting(true)
+    }, 500)
   }
 
   const lastThree = (transactions ?? [])
@@ -136,7 +148,7 @@ export function TransactionModal({ user, transactions = [], onClose, onShowToast
                 <button
                   key={label}
                   type="button"
-                  onClick={() => applyPreset(delta)}
+                  onClick={() => !isSubmitting && applyPreset(delta)}
                   className={cn(
                     'min-h-[48px] flex-1 min-w-[64px] rounded-2xl border-[3px] font-gaming text-sm font-bold tabular-nums transition touch-manipulation text-pop',
                     delta >= 0
@@ -155,7 +167,7 @@ export function TransactionModal({ user, transactions = [], onClose, onShowToast
                 <button
                   key={d}
                   type="button"
-                  onClick={() => append(d)}
+                  onClick={() => !isSubmitting && append(d)}
                   className="min-h-[52px] sm:min-h-[56px] rounded-2xl border-[3px] border-slate-600 bg-slate-700/90 font-gaming text-xl font-bold text-white hover:bg-slate-600 active:scale-95 transition touch-manipulation text-pop"
                 >
                   {d}
@@ -182,7 +194,7 @@ export function TransactionModal({ user, transactions = [], onClose, onShowToast
               <button
                 type="button"
                 onClick={handleAdd}
-                disabled={absValue <= 0}
+                disabled={absValue <= 0 || isSubmitting}
                 className="min-h-[60px] rounded-2xl border-[3px] border-emerald-500 bg-emerald-500/30 font-gaming text-lg font-bold text-emerald-100 uppercase tracking-wider hover:bg-emerald-500/40 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition touch-manipulation text-pop shadow-[0_4px_0_rgba(0,0,0,0.2),0_0_20px_rgba(52,211,153,0.25)]"
               >
                 НАЧИСЛИТЬ
@@ -190,7 +202,7 @@ export function TransactionModal({ user, transactions = [], onClose, onShowToast
               <button
                 type="button"
                 onClick={handleFine}
-                disabled={absValue <= 0}
+                disabled={absValue <= 0 || isSubmitting}
                 className="min-h-[60px] rounded-2xl border-[3px] border-red-500 bg-red-500/30 font-gaming text-lg font-bold text-red-100 uppercase tracking-wider hover:bg-red-500/40 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition touch-manipulation text-pop shadow-[0_4px_0_rgba(0,0,0,0.2),0_0_20px_rgba(239,68,68,0.25)]"
               >
                 ШТРАФ

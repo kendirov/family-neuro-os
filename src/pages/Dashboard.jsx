@@ -313,9 +313,17 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
       {(() => {
         const todayStart = getTodayStartTs()
         const todayEnd = todayStart + 24 * 60 * 60 * 1000
+        // NET earned today for this pilot: все транзакции (earn/spend, кроме burn).
         const todayEarned = (transactions ?? [])
-          .filter((t) => t.userId === user.id && t.amount > 0 && t.at >= todayStart && t.at < todayEnd)
+          .filter(
+            (t) =>
+              t.userId === user.id &&
+              t.at >= todayStart &&
+              t.at < todayEnd &&
+              t.type !== 'burn'
+          )
           .reduce((sum, t) => sum + t.amount, 0)
+        const todayEarnedLabel = `${todayEarned >= 0 ? '+' : ''}${todayEarned}`
         return (
           <div className="mb-3 shrink-0 rounded-2xl border-[3px] border-slate-600/60 bg-slate-800/90 px-4 py-4 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
             <div className="flex flex-col gap-2">
@@ -324,7 +332,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
                   ЗАРАБОТАНО СЕГОДНЯ
                 </span>
                 <span className="hud-score-earned text-emerald-300 drop-shadow-[0_0_10px_rgba(16,185,129,0.7)]">
-                  +{todayEarned}
+                  {todayEarnedLabel}
                 </span>
                 <span className="font-sans-data text-[10px] text-amber-300">⚡ XP</span>
               </div>
@@ -776,13 +784,15 @@ function WeeklyAnalytics() {
   todayStart.setHours(0, 0, 0, 0)
   const todayStartTs = todayStart.getTime()
 
+  // NET earned today (все earn/spend, кроме burn)
   const todayEarned = transactions
-    .filter((t) => t.at >= todayStartTs && t.amount > 0)
+    .filter((t) => t.at >= todayStartTs && t.type !== 'burn')
     .reduce((sum, t) => sum + t.amount, 0)
   const todayBurn = gamingToday?.dateKey === todayKey ? gamingToday?.minutes ?? 0 : 0
 
+  // NET total generated energy (sum по всем earn/spend, кроме burn)
   const totalGeneratedEnergy = transactions
-    .filter((t) => t.amount > 0)
+    .filter((t) => t.type !== 'burn')
     .reduce((sum, t) => sum + t.amount, 0)
 
   const weekKeys = getCurrentWeekDateKeys()
@@ -790,7 +800,7 @@ function WeeklyAnalytics() {
     const dayStart = new Date(dateKey + 'T00:00:00').getTime()
     const dayEnd = dayStart + 24 * 60 * 60 * 1000
     const earned = transactions
-      .filter((t) => t.at >= dayStart && t.at < dayEnd && t.amount > 0)
+      .filter((t) => t.at >= dayStart && t.at < dayEnd && t.type !== 'burn')
       .reduce((sum, t) => sum + t.amount, 0)
     const burn = dailyGamingMinutes[dateKey] ?? 0
     return { dateKey, earned, burn }

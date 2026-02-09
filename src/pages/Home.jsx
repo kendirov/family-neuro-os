@@ -25,8 +25,9 @@ export function Home() {
 
   const last20 = transactions.slice(0, 20)
   const todayStart = getTodayStart()
+  // NET earned today (все earn/spend, кроме burn)
   const todayEarned = transactions
-    .filter((t) => t.at >= todayStart && t.amount > 0)
+    .filter((t) => t.at >= todayStart && t.type !== 'burn')
     .reduce((sum, t) => sum + t.amount, 0)
   const progress = Math.min(1, todayEarned / DAILY_GOAL)
 

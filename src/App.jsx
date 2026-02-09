@@ -20,6 +20,7 @@ function App() {
   const fetchState = useAppStore((s) => s.fetchState)
   const setUsers = useAppStore((s) => s.setUsers)
   const checkDailyReset = useAppStore((s) => s.checkDailyReset)
+  const syncTimerStateFromProfile = useAppStore((s) => s.syncTimerStateFromProfile)
 
   useEffect(() => {
     fetchState()
@@ -39,31 +40,59 @@ function App() {
   }, [])
 
   useEffect(() => {
+    // Realtime subscription to profiles table for instant multi-device sync
+    // Listens to UPDATE events and immediately syncs timer state across all devices
     const channel = supabase
-      .channel('profiles-changes')
+      .channel('profiles-timer-sync')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles' },
+        { 
+          event: 'UPDATE', // Only listen to UPDATE events for timer state changes
+          schema: 'public', 
+          table: 'profiles'
+        },
         (payload) => {
+          // Only process updates for pilot profiles (roma, kirill)
+          const pilotId = payload.new?.id
+          if (!pilotId || (pilotId !== 'roma' && pilotId !== 'kirill')) {
+            return
+          }
+          
+          console.log('[Realtime] Timer state updated:', pilotId, {
+            timer_status: payload.new?.timer_status,
+            timer_start_at: payload.new?.timer_start_at,
+            seconds_today: payload.new?.seconds_today,
+            timer_mode: payload.new?.timer_mode
+          })
+          
           const current = useAppStore.getState().users
           if (payload.new) {
+            // Update users list (balance, name, etc.)
             const updated = profileToUser(payload.new)
             const next = current.some((u) => u.id === updated.id)
               ? current.map((u) => (u.id === updated.id ? updated : u))
               : [...current, updated]
             setUsers(next)
-          }
-          if (payload.old && !payload.new) {
-            setUsers(current.filter((u) => u.id !== payload.old.id))
+            
+            // CRITICAL: Immediately sync timer state from server-authoritative DB changes
+            // This ensures instant updates when timer is started/paused/stopped on another device
+            // The UI will react instantly via the ticker (setInterval) in PilotEngine.jsx
+            syncTimerStateFromProfile(payload.new)
           }
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] Successfully subscribed to profiles timer updates')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[Realtime] Channel subscription error')
+        }
+      })
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [setUsers])
+  }, [setUsers, syncTimerStateFromProfile])
 
   return (
     <Routes>

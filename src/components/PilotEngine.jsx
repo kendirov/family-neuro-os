@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Play, Pause, Square, Fan, Leaf, Coins, Flame } from 'lucide-react'
+import { Square, Gamepad2, Tv, Play, Pause, Loader2 } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
 import { playEngineRev, playCashRegister, playError } from '@/lib/sounds'
 import { PilotAvatar } from '@/components/HelmetAvatar'
@@ -37,26 +37,84 @@ const PILOT_CONFIG = {
 }
 
 /**
- * Single pilot engine card: header (name + avatar), large timer, big Play/Pause circle, small Stop square.
+ * Single pilot engine card: header (name + avatar), large timer, mode selector, dynamic action button, stop button.
  * Border glows (cyan/purple) when RUNNING; dims with "PAUSED" overlay when PAUSED.
+ * Timer display is calculated from server-authoritative state.
  */
-export function PilotEngine({ id, elapsedSeconds = 0, mode = 'game', onStartRefs, onPause, onResume, onStop }) {
+export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: initialMode = 'game', onStartRefs, onPause, onResume, onStop }) {
+  const [localMode, setLocalMode] = useState(initialMode)
+  const [isStarting, setIsStarting] = useState(false)
   const pilot = useAppStore((s) => s.pilots?.[id])
   const users = useAppStore((s) => s.users)
-  const startEngineStore = useAppStore((s) => s.startEngine)
-  const pauseEngineStore = useAppStore((s) => s.pauseEngine)
-  const resumeEngineStore = useAppStore((s) => s.resumeEngine)
-  const stopEngineStore = useAppStore((s) => s.stopEngine)
+  const startTimer = useAppStore((s) => s.startTimer)
+  const pauseTimer = useAppStore((s) => s.pauseTimer)
+  const resumeTimer = useAppStore((s) => s.resumeTimer)
+  const stopTimer = useAppStore((s) => s.stopTimer)
+  
+  // Calculate elapsed seconds from server-authoritative timer state
+  // IF timer_status === 'idle': Display 00:00
+  // IF timer_status === 'paused': Display seconds_today formatted
+  // IF timer_status === 'running': Display seconds_today + (NOW() - timer_start_at)
+  const calculateElapsedSeconds = (pilotState) => {
+    if (!pilotState || pilotState.timerStatus === 'idle') return 0
+    
+    const secondsToday = pilotState.secondsToday ?? 0
+    
+    if (pilotState.timerStatus === 'running' && pilotState.timerStartAt) {
+      const now = Date.now()
+      const startMs = new Date(pilotState.timerStartAt).getTime()
+      const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
+      return secondsToday + currentSegmentSeconds
+    }
+    
+    // Paused: just return seconds_today
+    return secondsToday
+  }
+  
+  const [displayElapsedSeconds, setDisplayElapsedSeconds] = useState(() => calculateElapsedSeconds(pilot))
+  
+  // Update display every second when timer is running (UI-only counter based on server timestamp)
+  // This "ticker" forces re-renders to update the calculated time display (NOW - start_at)
+  // It does NOT change data, only updates the visual text "14:01", "14:02"...
+  useEffect(() => {
+    // Immediately update display when state changes
+    const currentElapsed = calculateElapsedSeconds(pilot)
+    setDisplayElapsedSeconds(currentElapsed)
+    
+    // Only run interval when timer is actively running
+    if (!pilot || pilot.timerStatus !== 'running') {
+      return
+    }
+    
+    // Set up ticker: update display every second
+    // Read from store directly to get latest state (not closure)
+    const interval = setInterval(() => {
+      const currentPilot = useAppStore.getState().pilots?.[id]
+      if (currentPilot) {
+        const elapsed = calculateElapsedSeconds(currentPilot)
+        setDisplayElapsedSeconds(elapsed)
+      }
+    }, 1000)
+    
+    return () => clearInterval(interval)
+  }, [pilot?.timerStatus, pilot?.timerStartAt, pilot?.secondsToday, id])
+  
+  const elapsedSeconds = displayElapsedSeconds
 
   const config = PILOT_CONFIG[id] ?? PILOT_CONFIG.roma
   const { name, glowClass, textClass, bgGlow } = config
-  const status = pilot?.status ?? 'IDLE'
-  const isRunning = status === 'RUNNING'
-  const isPaused = status === 'PAUSED'
-  const isIdle = status === 'IDLE'
+  // Use timerStatus from server-authoritative state
+  const timerStatus = pilot?.timerStatus ?? 'idle'
+  const isRunning = timerStatus === 'running'
+  const isPaused = timerStatus === 'paused'
+  const isIdle = timerStatus === 'idle'
 
   const user = users?.find((u) => u.id === id)
   const canStart = user && user.balance >= 1
+
+  // Use mode from pilot state if running/paused, otherwise use local mode
+  const effectiveMode = (isRunning || isPaused) && pilot?.mode ? pilot.mode : localMode
+  const isMediaMode = effectiveMode === 'youtube' || effectiveMode === 'good'
 
   // Get per-user time tracking for tier calculation
   const getTodayGameTime = useAppStore((s) => s.getTodayGameTime)
@@ -64,107 +122,81 @@ export function PilotEngine({ id, elapsedSeconds = 0, mode = 'game', onStartRefs
   const todayGameTime = getTodayGameTime(id)
   const todayMediaTime = getTodayMediaTime(id)
 
-  // Determine tier and zone info based on mode
-  const isMediaMode = mode === 'youtube' || mode === 'good'
+  // Determine tier and zone info based on effective mode
   const currentTime = isMediaMode ? todayMediaTime : todayGameTime
 
-  // Zone configuration for Media (Cartoons)
-  const mediaZone = useMemo(() => {
-    if (currentTime < 20) {
+  // Calculate current zone and cost for visual timeline
+  const timelineZone = useMemo(() => {
+    if (isMediaMode) {
+      // Media mode: 0-20 = Green (Free), 20+ = Orange (Paid)
+      const isGreenZone = currentTime < 20
+      const cost = isGreenZone ? 0 : (currentTime < 60 ? 0.5 : 2)
       return {
-        tier: 1,
-        label: 'БЕСПЛАТНО 🎁',
-        icon: Leaf,
-        timerColor: 'text-green-400',
-        timerBg: 'bg-green-500/10 border-green-500/50',
-        badgeColor: 'bg-green-500/20 border-green-500/60 text-green-300',
-        progressColor: 'bg-green-500',
-        nextThreshold: 20,
-        progressPercent: (currentTime / 20) * 100,
-        maxScale: 20,
-      }
-    } else if (currentTime < 60) {
-      return {
-        tier: 2,
-        label: 'ТАРИФ 0.5x ⭐️',
-        icon: Coins,
-        timerColor: 'text-yellow-400',
-        timerBg: 'bg-yellow-500/10 border-yellow-500/50',
-        badgeColor: 'bg-yellow-500/20 border-yellow-500/60 text-yellow-300',
-        progressColor: 'bg-yellow-500',
-        nextThreshold: 60,
-        progressPercent: (currentTime / 60) * 100, // Overall progress from 0 to 60
-        maxScale: 60,
+        isGreenZone,
+        cost,
+        timerGlow: isGreenZone ? 'text-green-400 drop-shadow-[0_0_15px_rgba(34,197,94,0.6)]' : 'text-orange-400 drop-shadow-[0_0_15px_rgba(251,146,60,0.6)]',
+        timerBg: isGreenZone ? 'bg-green-500/10 border-green-500/50' : 'bg-orange-500/10 border-orange-500/50',
       }
     } else {
+      // Game mode: Always paid, but simpler display
+      const cost = currentTime < 60 ? 1 : 2
       return {
-        tier: 3,
-        label: 'ПЕРЕГРУЗКА 2x 🔥',
-        icon: Flame,
-        timerColor: 'text-red-400',
-        timerBg: 'bg-red-500/10 border-red-500/50',
-        badgeColor: 'bg-red-500/20 border-red-500/60 text-red-300',
-        progressColor: 'bg-red-500',
-        nextThreshold: null,
-        progressPercent: 100,
-        maxScale: 60,
-      }
-    }
-  }, [currentTime, isMediaMode])
-
-  // Zone configuration for Games
-  const gameZone = useMemo(() => {
-    if (currentTime < 60) {
-      return {
-        tier: 1,
-        label: 'НОРМА 1x 💠',
-        timerColor: 'text-cyan-400',
+        isGreenZone: false,
+        cost,
+        timerGlow: 'text-cyan-400 drop-shadow-[0_0_15px_rgba(34,211,238,0.6)]',
         timerBg: 'bg-cyan-500/10 border-cyan-500/50',
-        badgeColor: 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300',
-        progressColor: 'bg-cyan-500',
-        nextThreshold: 60,
-        progressPercent: (currentTime / 60) * 100,
-        maxScale: 60,
-      }
-    } else {
-      return {
-        tier: 2,
-        label: 'ПЕРЕГРУЗКА 2x 🔥',
-        timerColor: 'text-red-400',
-        timerBg: 'bg-red-500/10 border-red-500/50',
-        badgeColor: 'bg-red-500/20 border-red-500/60 text-red-300',
-        progressColor: 'bg-red-500',
-        nextThreshold: null,
-        progressPercent: 100,
-        maxScale: 60,
       }
     }
   }, [currentTime, isMediaMode])
 
-  const zone = isMediaMode ? mediaZone : gameZone
-  const ZoneIcon = zone.icon
+  const handleActionButton = async () => {
+    // Prevent spamming / double-clicks while a previous action is in flight
+    if (isStarting) return
 
-  const handlePlayPause = () => {
     if (isIdle) {
       if (!canStart) {
         playError()
         return
       }
+      setIsStarting(true)
       playEngineRev()
-      startEngineStore(id, mode)
-      if (onStartRefs) onStartRefs(id)
+      try {
+        await startTimer(id, effectiveMode)
+        if (onStartRefs) onStartRefs(id)
+      } catch (e) {
+        console.error('Failed to start timer:', e)
+        playError()
+      } finally {
+        // Short cooldown so UI and Supabase stay in sync
+        setTimeout(() => {
+          setIsStarting(false)
+        }, 500)
+      }
     } else if (isRunning) {
-      pauseEngineStore(id)
+      setIsStarting(true)
+      pauseTimer(id)
       if (onPause) onPause(id)
+      setTimeout(() => {
+        setIsStarting(false)
+      }, 500)
     } else if (isPaused) {
-      resumeEngineStore(id)
+      setIsStarting(true)
+      resumeTimer(id)
       if (onResume) onResume(id)
+      setTimeout(() => {
+        setIsStarting(false)
+      }, 500)
     }
+  }
+  
+  const handleModeChange = (newMode) => {
+    if (isRunning || isPaused) return // Don't allow mode change during active session
+    setLocalMode(newMode)
   }
 
   const handleStop = () => {
     if (isIdle) return
-    stopEngineStore(id)
+    stopTimer(id)
     playCashRegister()
     if (onStop) onStop(id)
   }
@@ -172,7 +204,7 @@ export function PilotEngine({ id, elapsedSeconds = 0, mode = 'game', onStartRefs
   return (
     <motion.div
       className={cn(
-        'relative rounded-2xl border-[3px] bg-slate-800/95 p-4 overflow-hidden transition-all duration-300',
+        'relative rounded-2xl border-[3px] bg-slate-800/95 p-6 overflow-hidden transition-all duration-300 flex flex-col',
         isRunning && glowClass,
         isRunning && bgGlow,
         !isRunning && 'border-slate-600/70',
@@ -188,180 +220,197 @@ export function PilotEngine({ id, elapsedSeconds = 0, mode = 'game', onStartRefs
       )}
 
       {/* Header: pixel art avatar + name */}
-      <div className={cn('flex items-center gap-3 mb-3', textClass)}>
+      <div className={cn('flex items-center gap-3 mb-4', textClass)}>
         <PilotAvatar pilotId={id} size="engine" />
         <span className="font-gaming text-base font-bold uppercase tracking-wider">{name}</span>
       </div>
 
-      {/* Zone Indicator Badge */}
-      {(isRunning || isPaused) && (
+      {/* Mode Switcher: Top (only changeable when idle) */}
+      <div className="mb-6">
+        <div className="flex gap-2 rounded-xl border-2 border-slate-600/60 bg-slate-900/50 p-1">
+          <button
+            type="button"
+            onClick={() => handleModeChange('game')}
+            disabled={isRunning || isPaused}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-gaming text-xs font-bold uppercase transition-all touch-manipulation',
+              effectiveMode === 'game'
+                ? 'bg-cyan-500/25 border-2 border-cyan-500/60 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.3)]'
+                : 'text-slate-400 hover:text-slate-300 border-2 border-transparent',
+              (isRunning || isPaused) && effectiveMode !== 'game' && 'opacity-50 cursor-not-allowed',
+              (isRunning || isPaused) && effectiveMode === 'game' && 'cursor-default'
+            )}
+            title={(isRunning || isPaused) ? 'Режим активной сессии' : 'Выбрать режим'}
+          >
+            <Gamepad2 className="h-4 w-4" strokeWidth={2.5} />
+            <span>🎮 ИГРЫ</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleModeChange('youtube')}
+            disabled={isRunning || isPaused}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-gaming text-xs font-bold uppercase transition-all touch-manipulation',
+              isMediaMode
+                ? 'bg-orange-500/25 border-2 border-orange-500/60 text-orange-300 shadow-[0_0_10px_rgba(251,146,60,0.3)]'
+                : 'text-slate-400 hover:text-slate-300 border-2 border-transparent',
+              (isRunning || isPaused) && !isMediaMode && 'opacity-50 cursor-not-allowed',
+              (isRunning || isPaused) && isMediaMode && 'cursor-default'
+            )}
+            title={(isRunning || isPaused) ? 'Режим активной сессии' : 'Выбрать режим'}
+          >
+            <Tv className="h-4 w-4" strokeWidth={2.5} />
+            <span>📺 МУЛЬТИКИ</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Center: Huge Time Display */}
+      <div className="flex flex-col items-center justify-center mb-6 flex-1 min-h-[120px]">
         <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
           className={cn(
-            'flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg border-2 mb-2 font-gaming text-xs font-bold uppercase tracking-wider',
-            zone.badgeColor,
-            zone.tier === 3 && 'animate-pulse'
+            'font-mono text-5xl sm:text-6xl font-black tabular-nums text-center transition-all duration-300',
+            (isRunning || isPaused) ? timelineZone.timerGlow : 'text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.5)]'
           )}
         >
-          {ZoneIcon && <ZoneIcon className="h-4 w-4" strokeWidth={2.5} />}
-          <span>{zone.label}</span>
+          {formatElapsed(Math.max(0, Math.floor(elapsedSeconds)))}
         </motion.div>
-      )}
-
-      {/* Large digital timer + animated icon when active */}
-      <div className="flex flex-col gap-1.5 mb-3">
-        <div className="flex items-center justify-center gap-2">
-          <motion.div
-            className={cn(
-              'font-lcd text-3xl sm:text-4xl font-black tabular-nums text-center py-3 flex-1 min-w-0 rounded-xl border-2 transition-colors duration-300',
-              (isRunning || isPaused) ? zone.timerBg : 'bg-slate-900/80 border-slate-600/60',
-              (isRunning || isPaused) ? zone.timerColor : 'text-slate-100',
-              zone.tier === 3 && isRunning && 'animate-pulse'
-            )}
-          >
-            {formatElapsed(Math.max(0, Math.floor(elapsedSeconds)))}
-          </motion.div>
-          {isRunning && (
-            <motion.div
-              className={cn(
-                'shrink-0 w-10 h-10 rounded-xl border-2 flex items-center justify-center',
-                id === 'roma' ? 'border-cyan-500/50 bg-cyan-500/20 text-cyan-400' : 'border-purple-500/50 bg-purple-500/20 text-purple-400'
-              )}
-              animate={{ rotate: 360 }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-              aria-hidden
-            >
-              <Fan className="h-5 w-5" strokeWidth={2} />
-            </motion.div>
-          )}
-        </div>
-        {(isRunning || isPaused) && pilot?.sessionBalanceAtStart != null && (
-          <p className="font-mono text-[10px] text-slate-500 uppercase tracking-wider text-center">
-            Осталось примерно:{' '}
-            <span className="tabular-nums text-slate-400 font-bold">
-              {Math.max(0, Math.floor((pilot.sessionBalanceAtStart ?? 0) - (pilot.sessionMinutes ?? 0)))} мин
+        
+        {/* Cost Display */}
+        {(isRunning || isPaused) && (
+          <div className="mt-2 text-center">
+            <span className={cn(
+              'font-mono text-xs font-bold uppercase tracking-wider',
+              timelineZone.isGreenZone ? 'text-green-400' : 'text-orange-400'
+            )}>
+              COST: {timelineZone.cost === 0 ? '0' : `-${timelineZone.cost}`} XP/min
             </span>
-          </p>
+          </div>
         )}
       </div>
 
-      {/* Tier Progress Bar: shows progress toward next tier */}
-      {(isRunning || isPaused) && (
-        <div className="rounded-xl border border-slate-600/60 bg-slate-900/70 backdrop-blur-sm overflow-hidden mb-4 h-8 relative">
-          {/* Progress fill */}
-          <motion.div
-            className={cn('absolute inset-y-0 left-0 rounded-xl min-w-[4%]', zone.progressColor)}
-            style={{ width: `${Math.max(4, Math.min(100, zone.progressPercent))}%` }}
-            transition={{ width: { duration: 0.5 } }}
-          />
-          
-          {/* Segment markers */}
-          {isMediaMode ? (
-            <>
-              {/* 20 min marker (33.3% of 60 min scale) */}
-              <div
-                className="absolute top-0 bottom-0 w-0.5 bg-slate-500/50 z-10"
-                style={{ left: `${(20 / zone.maxScale) * 100}%` }}
-                aria-hidden
-              />
-              {/* 60 min marker (100% of scale) */}
-              <div
-                className="absolute top-0 bottom-0 w-0.5 bg-slate-500/50 z-10"
-                style={{ left: '100%' }}
-                aria-hidden
-              />
-            </>
-          ) : (
-            <>
-              {/* 60 min marker for games */}
-              <div
-                className="absolute top-0 bottom-0 w-0.5 bg-slate-500/50 z-10"
-                style={{ left: '100%' }}
-                aria-hidden
-              />
-            </>
-          )}
-          
-          {/* Progress text overlay */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-            <span className="font-mono text-[9px] text-slate-400 uppercase tracking-wider tabular-nums drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-              {currentTime} мин {zone.nextThreshold ? `→ ${zone.nextThreshold} мин` : '(макс)'}
-            </span>
+      {/* Visual Timeline Bar: Below Time Display */}
+      {(isRunning || isPaused) && isMediaMode && (
+        <div className="mb-6">
+          <div className="relative h-12 rounded-xl border-2 border-slate-600/60 bg-slate-900/80 overflow-hidden">
+            {/* Green Zone (0-20 mins): БОНУС */}
+            <div 
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-500 via-emerald-400 to-green-500"
+              style={{ width: '33.33%' }}
+            >
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="font-gaming text-[10px] font-bold uppercase text-green-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.3)]">
+                  БОНУС
+                </span>
+              </div>
+            </div>
+            
+            {/* Orange Zone (20+ mins): ТАРИФ */}
+            <div 
+              className="absolute inset-y-0 right-0 bg-gradient-to-r from-orange-500 via-amber-400 to-orange-500"
+              style={{ left: '33.33%', width: '66.67%' }}
+            >
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="font-gaming text-[10px] font-bold uppercase text-orange-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.3)]">
+                  ТАРИФ
+                </span>
+              </div>
+            </div>
+            
+            {/* Zone divider at 20 mins */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-white/60 z-10 shadow-[0_0_4px_rgba(255,255,255,0.5)]"
+              style={{ left: '33.33%' }}
+              aria-hidden
+            />
+            
+            {/* White Needle/Marker: moves based on current_minutes */}
+            <motion.div
+              className="absolute top-0 bottom-0 w-1 bg-white z-20 shadow-[0_0_8px_rgba(255,255,255,0.8)]"
+              style={{ 
+                left: `${Math.min(100, Math.max(0, (currentTime / 60) * 100))}%`,
+                transform: 'translateX(-50%)'
+              }}
+              transition={{ left: { duration: 0.3, ease: 'easeOut' } }}
+              aria-hidden
+            >
+              {/* Needle pointer */}
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-b-[8px] border-l-transparent border-r-transparent border-b-white" />
+            </motion.div>
+          </div>
+        </div>
+      )}
+      
+      {/* Simplified timeline for Game mode */}
+      {(isRunning || isPaused) && !isMediaMode && (
+        <div className="mb-6">
+          <div className="relative h-8 rounded-xl border-2 border-slate-600/60 bg-slate-900/80 overflow-hidden">
+            {/* Cyan fill for game mode */}
+            <motion.div
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-500 via-blue-400 to-cyan-500"
+              style={{ width: `${Math.min(100, (currentTime / 60) * 100)}%` }}
+              transition={{ width: { duration: 0.3 } }}
+            />
+            
+            {/* White needle */}
+            <motion.div
+              className="absolute top-0 bottom-0 w-1 bg-white z-20 shadow-[0_0_6px_rgba(255,255,255,0.8)]"
+              style={{ 
+                left: `${Math.min(100, Math.max(0, (currentTime / 60) * 100))}%`,
+                transform: 'translateX(-50%)'
+              }}
+              transition={{ left: { duration: 0.3, ease: 'easeOut' } }}
+              aria-hidden
+            />
           </div>
         </div>
       )}
 
-      {/* Controls: Burn Cycle ring + big circle (Play/Pause) + small square (Stop) */}
-      <div className="flex items-center justify-center gap-3">
-        <div className="relative flex items-center justify-center">
-          {/* Burn Cycle: circular progress 0%→100% over 60s, resets when XP drops */}
-          {(isRunning || isPaused) && (
-            <svg
-              className="absolute w-[72px] h-[72px] -rotate-90 pointer-events-none"
-              viewBox="0 0 72 72"
-              aria-hidden
-            >
-              <circle
-                cx="36"
-                cy="36"
-                r="30"
-                fill="none"
-                strokeWidth="3"
-                className="stroke-slate-600/70"
-              />
-              <circle
-                cx="36"
-                cy="36"
-                r="30"
-                fill="none"
-                strokeWidth="3"
-                strokeLinecap="round"
-                className={cn(
-                  'burn-cycle-progress transition-[stroke-dasharray] duration-1000 ease-linear',
-                  isRunning ? 'stroke-amber-400/90' : 'stroke-emerald-500/70'
-                )}
-                style={{
-                  strokeDasharray: `${((elapsedSeconds % 60) / 60) * Math.PI * 60} ${Math.PI * 60}`,
-                }}
-              />
-            </svg>
+      {/* Controls: Bottom - Primary Button (Center, Huge, Round) + Stop Button (Right, Small) */}
+      <div className="flex items-center justify-center gap-4 mt-auto">
+        {/* Primary Button: Huge Round Play/Pause */}
+        <motion.button
+          type="button"
+          onClick={handleActionButton}
+          disabled={(isIdle && !canStart) || isStarting}
+          className={cn(
+            'relative w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 transition-all touch-manipulation flex items-center justify-center shadow-2xl',
+            isIdle && !canStart && 'opacity-50 cursor-not-allowed border-slate-600 bg-slate-700/50',
+            isIdle && canStart && !isStarting && 'bg-gradient-to-br from-emerald-500 to-blue-500 border-emerald-400/80 hover:scale-105 active:scale-95 animate-pulse',
+            isIdle && canStart && isStarting && 'bg-gradient-to-br from-slate-500 to-slate-600 border-slate-400/80 cursor-wait',
+            isRunning && 'bg-gradient-to-br from-amber-500 to-yellow-500 border-amber-400/80 hover:scale-105 active:scale-95',
+            isPaused && 'bg-gradient-to-br from-emerald-500 to-blue-500 border-emerald-400/80 hover:scale-105 active:scale-95'
           )}
-          <motion.button
-            type="button"
-            onClick={handlePlayPause}
-            disabled={isIdle && !canStart}
-            className={cn(
-              'relative z-10 w-14 h-14 rounded-full border-[3px] flex items-center justify-center transition touch-manipulation',
-              isIdle && !canStart && 'opacity-50 cursor-not-allowed',
-              isRunning && 'border-amber-500/80 bg-amber-500/25 text-amber-100 hover:bg-amber-500/35',
-              isPaused && 'border-emerald-500/80 bg-emerald-500/25 text-emerald-100 hover:bg-emerald-500/35',
-              isIdle && canStart && 'border-emerald-500/80 bg-emerald-500/25 text-emerald-100 hover:bg-emerald-500/35'
-            )}
-            whileHover={(isIdle && canStart) || !isIdle ? { scale: 1.05 } : undefined}
-            whileTap={(isIdle && canStart) || !isIdle ? { scale: 0.95 } : undefined}
-            aria-label={isIdle ? 'Запуск' : isRunning ? 'Пауза' : 'Продолжить'}
-          >
-            {isRunning ? (
-              <Pause className="h-7 w-7" strokeWidth={2.5} />
-            ) : (
-              <Play className="h-7 w-7 ml-0.5" strokeWidth={2.5} />
-            )}
-          </motion.button>
-        </div>
+          whileHover={(isIdle && canStart && !isStarting) || !isIdle ? { scale: 1.05 } : undefined}
+          whileTap={(isIdle && canStart && !isStarting) || !isIdle ? { scale: 0.95 } : undefined}
+        >
+          {isStarting ? (
+            <Loader2 className="w-10 h-10 text-white animate-spin" strokeWidth={3} />
+          ) : isIdle ? (
+            <Play className="w-10 h-10 sm:w-12 sm:h-12 text-white ml-1" strokeWidth={3} fill="currentColor" />
+          ) : isRunning ? (
+            <Pause className="w-10 h-10 sm:w-12 sm:h-12 text-white" strokeWidth={3} fill="currentColor" />
+          ) : (
+            <Play className="w-10 h-10 sm:w-12 sm:h-12 text-white ml-1" strokeWidth={3} fill="currentColor" />
+          )}
+        </motion.button>
+
+        {/* Stop Button: Small, Right */}
         <motion.button
           type="button"
           onClick={handleStop}
           disabled={isIdle}
           className={cn(
-            'w-11 h-11 rounded-lg border-[3px] flex items-center justify-center border-red-500/80 bg-red-500/20 text-red-200 hover:bg-red-500/30 transition touch-manipulation',
-            isIdle && 'opacity-40 cursor-not-allowed'
+            'w-12 h-12 sm:w-14 sm:h-14 rounded-full border-2 flex items-center justify-center transition-all touch-manipulation shadow-lg',
+            isIdle
+              ? 'opacity-40 cursor-not-allowed border-slate-600 bg-slate-700/30 text-slate-500'
+              : 'border-red-500/80 bg-gradient-to-br from-red-500/20 to-red-600/20 text-red-200 hover:bg-red-500/30 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(239,68,68,0.3)]'
           )}
           whileHover={!isIdle ? { scale: 1.05 } : undefined}
           whileTap={!isIdle ? { scale: 0.95 } : undefined}
           aria-label="Стоп (сохранить и сбросить)"
         >
-          <Square className="h-4 w-4 fill-current" strokeWidth={2} />
+          <Square className="w-5 h-5 sm:w-6 sm:h-6 fill-current" strokeWidth={2.5} />
         </motion.button>
       </div>
     </motion.div>

@@ -6,6 +6,7 @@ import { playEngineRev, playCashRegister, playError, playBurnTick } from '@/lib/
 import { cn } from '@/lib/utils'
 import { PilotEngine } from '@/components/PilotEngine'
 import { WheelBanner } from '@/components/WheelBanner'
+import { ConsumptionWidget } from '@/components/ConsumptionWidget'
 
 const MODES = [
   { id: 'game', label: 'ИГРЫ', Icon: Gamepad2, color: 'blue', emoji: '🎮' },
@@ -325,38 +326,33 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
   const [tick, setTick] = useState(0)
   const [sessionCreditsBurned, setSessionCreditsBurned] = useState(0)
 
-  const startTimeRef = useRef({ roma: 0, kirill: 0 })
-  const pausedElapsedRef = useRef({ roma: 0, kirill: 0 })
   const lastDeductedMinuteRef = useRef({ roma: 0, kirill: 0 })
   const intervalRef = useRef(null)
 
   const anyRunning = (pilots?.roma?.status === 'RUNNING') || (pilots?.kirill?.status === 'RUNNING')
 
-  /** Per-pilot elapsed: prefer startTimeRef when set (pause/resume), else drift-free from sessionStartAt (server). */
-  const romaStartMs =
-    startTimeRef.current.roma
-      ? startTimeRef.current.roma
-      : pilots?.roma?.sessionStartAt
-        ? new Date(pilots.roma.sessionStartAt).getTime()
-        : Date.now()
-  const kirillStartMs =
-    startTimeRef.current.kirill
-      ? startTimeRef.current.kirill
-      : pilots?.kirill?.sessionStartAt
-        ? new Date(pilots.kirill.sessionStartAt).getTime()
-        : Date.now()
-  const romaElapsedSeconds =
-    pilots?.roma?.status === 'RUNNING'
-      ? (Date.now() / 1000 - romaStartMs / 1000) | 0
-      : pilots?.roma?.status === 'PAUSED'
-        ? (pausedElapsedRef.current.roma || 0) | 0
-        : 0
-  const kirillElapsedSeconds =
-    pilots?.kirill?.status === 'RUNNING'
-      ? (Date.now() / 1000 - kirillStartMs / 1000) | 0
-      : pilots?.kirill?.status === 'PAUSED'
-        ? (pausedElapsedRef.current.kirill || 0) | 0
-        : 0
+  /** Calculate elapsed seconds from server-authoritative timer state.
+   * IF timer_status === 'running': VisualTime = seconds_accumulated_today + (NOW - timer_start_at)
+   * IF timer_status === 'paused': VisualTime = seconds_accumulated_today
+   */
+  const calculateElapsedSeconds = (pilot) => {
+    if (!pilot || pilot.timerStatus === 'idle') return 0
+    
+    const accumulated = pilot.secondsAccumulatedToday ?? 0
+    
+    if (pilot.timerStatus === 'running' && pilot.timerStartAt) {
+      const now = Date.now()
+      const startMs = new Date(pilot.timerStartAt).getTime()
+      const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
+      return accumulated + currentSegmentSeconds
+    }
+    
+    // Paused: just return accumulated seconds
+    return accumulated
+  }
+  
+  const romaElapsedSeconds = calculateElapsedSeconds(pilots?.roma)
+  const kirillElapsedSeconds = calculateElapsedSeconds(pilots?.kirill)
 
   const startBoth = () => {
     const bothCanStart =
@@ -368,9 +364,6 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
     playEngineRev()
     startEngineStore('roma', mode)
     startEngineStore('kirill', mode)
-    startTimeRef.current.roma = Date.now()
-    startTimeRef.current.kirill = Date.now()
-    pausedElapsedRef.current = { roma: 0, kirill: 0 }
     lastDeductedMinuteRef.current = { roma: 0, kirill: 0 }
     setSessionCreditsBurned(0)
   }
@@ -378,43 +371,48 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
   const pauseAll = () => {
     PILOT_IDS.forEach((id) => {
       if (pilots?.[id]?.status !== 'RUNNING') return
-      const elapsed = (Date.now() - (startTimeRef.current[id] || Date.now())) / 1000 + (pausedElapsedRef.current[id] || 0)
-      pausedElapsedRef.current[id] = elapsed
       pauseEngineStore(id)
     })
   }
 
+  // Callbacks for PilotEngine (no longer need local state management)
   const onStartRefs = (id) => {
-    startTimeRef.current[id] = Date.now()
-    pausedElapsedRef.current[id] = 0
     lastDeductedMinuteRef.current[id] = 0
   }
 
   const onPause = (id) => {
-    const elapsed = (Date.now() - (startTimeRef.current[id] || Date.now())) / 1000 + (pausedElapsedRef.current[id] || 0)
-    pausedElapsedRef.current[id] = elapsed
+    // Server handles pause state
   }
 
   const onResume = (id) => {
-    startTimeRef.current[id] = Date.now() - (pausedElapsedRef.current[id] || 0) * 1000
+    // Server handles resume state
   }
 
   const onStop = (id) => {
-    startTimeRef.current[id] = 0
-    pausedElapsedRef.current[id] = 0
     lastDeductedMinuteRef.current[id] = 0
   }
 
-  /** Tick every 1000ms: drift-free elapsed from sessionStartAt (or startTimeRef); store session MINUTES for deduction. */
+  /** Tick every 1000ms: update UI counter based on server timer state. */
   useEffect(() => {
     if (!anyRunning) return
     intervalRef.current = setInterval(() => {
       setTick((t) => t + 1)
       PILOT_IDS.forEach((id) => {
-        if (pilots?.[id]?.status !== 'RUNNING') return
-        const p = pilots[id]
-        const startMs = p?.sessionStartAt ? new Date(p.sessionStartAt).getTime() : (startTimeRef.current[id] || Date.now())
-        const elapsedSeconds = (Date.now() - startMs) / 1000
+        const p = pilots?.[id]
+        if (!p || p.status !== 'RUNNING') return
+        
+        // Calculate elapsed seconds from server state
+        // IF status == 'running': seconds_today + (NOW - timer_start_at)
+        // IF status == 'paused': seconds_today
+        const secondsToday = p.secondsToday ?? 0
+        let elapsedSeconds = secondsToday
+        if (p.timerStatus === 'running' && p.timerStartAt) {
+          const now = Date.now()
+          const startMs = new Date(p.timerStartAt).getTime()
+          const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
+          elapsedSeconds = secondsToday + currentSegmentSeconds
+        }
+        
         const rawMinutes = Math.floor(elapsedSeconds / 60)
         const cap = p?.sessionBalanceAtStart != null ? p.sessionBalanceAtStart : Infinity
         const sessionMinutes = Math.min(rawMinutes, cap)
@@ -424,7 +422,7 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [anyRunning, setPilotSessionMinutes, pilots?.roma?.status, pilots?.kirill?.status, pilots?.roma?.sessionStartAt, pilots?.kirill?.sessionStartAt])
+  }, [anyRunning, setPilotSessionMinutes, pilots?.roma?.status, pilots?.kirill?.status, pilots?.roma?.timerStartAt, pilots?.kirill?.timerStartAt, pilots?.roma?.secondsToday, pilots?.kirill?.secondsToday, pilots?.roma?.timerStatus, pilots?.kirill?.timerStatus])
 
   /**
    * Per-MINUTE deduction only: for each RUNNING pilot, deduct 1 XP (or 2 on weekday overdrive) per elapsed minute.
@@ -565,7 +563,6 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
                     setMode('youtube')
                   }
                 }}
-                disabled={anyRunning}
                 className={cn(
                   'flex-1 min-h-[56px] px-4 rounded-xl border-[3px] font-gaming text-sm font-bold uppercase transition-all touch-manipulation flex items-center justify-center gap-2',
                   isGameGroup &&
@@ -592,12 +589,11 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
             <button
               type="button"
               onClick={() => setMode('youtube')}
-              disabled={anyRunning}
               className={cn(
                 'min-h-[36px] px-3 rounded-lg border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
                 mode === 'youtube'
                   ? 'border-pink-500 bg-pink-500/25 text-pink-300'
-                  : 'border-slate-600 text-slate-400'
+                  : 'border-slate-600 text-slate-400 hover:border-slate-500'
               )}
             >
               <Tv className="h-3.5 w-3.5" strokeWidth={2.5} />
@@ -606,12 +602,11 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
             <button
               type="button"
               onClick={() => setMode('good')}
-              disabled={anyRunning}
               className={cn(
                 'min-h-[36px] px-3 rounded-lg border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
                 mode === 'good'
                   ? 'border-emerald-500 bg-emerald-500/25 text-emerald-200'
-                  : 'border-slate-600 text-slate-400'
+                  : 'border-slate-600 text-slate-400 hover:border-slate-500'
               )}
             >
               <Apple className="h-3.5 w-3.5" strokeWidth={2.5} />
@@ -678,6 +673,9 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
           onStop={onStop}
         />
       </div>
+
+      {/* Daily consumption gauges (per-pilot fuel tanks) */}
+      <ConsumptionWidget />
 
       {/* Reactor Core + Daily Stats below cards */}
       <ReactorCore />

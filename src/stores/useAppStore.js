@@ -32,6 +32,10 @@ const initialPilotState = () => ({
   activeSessionId: null,
   /** Cumulative XP burned this session; used to update the single session tx. */
   sessionTotalBurned: 0,
+  /** Server-authoritative timer state */
+  timerStatus: 'idle',
+  timerStartAt: null,
+  secondsToday: 0,
 })
 
 /** Map DB profile row to store user shape. */
@@ -88,6 +92,16 @@ export const useAppStore = create((set, get) => ({
   transactions: [],
   purchases: [],
   isLoading: true,
+
+  /** Wheel of Fortune: last spins (global history). */
+  spinHistory: [],
+
+  /** Wheel of Fortune: spins used today per pilot (limit logic). */
+  spinsUsedToday: {
+    date: getDateKey(),
+    roma: 0,
+    kirill: 0,
+  },
 
   /** Per-user today time tracking: { [userId]: { game: number, media: number } } */
   todayTimeTracking: {},
@@ -155,19 +169,32 @@ export const useAppStore = create((set, get) => ({
     const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('family_lastActiveDate') : null
     if (stored !== today) {
       // New day: reset daily tracking
-      set({ dailyBase: {}, lastActiveDate: today, todayTimeTracking: {} })
+      set({ 
+        dailyBase: {}, 
+        lastActiveDate: today, 
+        todayTimeTracking: {},
+        spinsUsedToday: { date: today, roma: 0, kirill: 0 },
+        spinHistory: [],
+      })
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('family_lastActiveDate', today)
         localStorage.removeItem('family_dailyBase')
       }
-      // Reset time tracking in database for all pilots
+      // Reset time tracking and timer state in database for all pilots
       ;(async () => {
         try {
           await Promise.all(
             PILOT_IDS.map((id) =>
               supabase
                 .from('profiles')
-                .update({ today_game_time: 0, today_media_time: 0 })
+                .update({ 
+                  today_game_time: 0, 
+                  today_media_time: 0,
+                  seconds_today: 0,
+                  timer_status: 'idle',
+                  timer_mode: null,
+                  timer_start_at: null,
+                })
                 .eq('id', id)
             )
           )
@@ -479,149 +506,253 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  startEngine: (pilotId, mode = 'game') => {
+  startTimer: async (pilotId, mode = 'game') => {
     const state = get()
     const user = state.users.find((u) => u.id === pilotId)
     const balanceAtStart = user ? Math.max(0, user.balance) : 0
     const now = new Date().toISOString()
     const m = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
-    set((s) => ({
-      pilots: {
-        ...s.pilots,
-        [pilotId]: {
-          status: 'RUNNING',
-          sessionMinutes: 0,
-          burnerActive: true,
-          mode: m,
-          sessionStartAt: now,
-          lastBurnAt: now,
-          sessionBalanceAtStart: balanceAtStart,
-          activeSessionId: null,
-          sessionTotalBurned: 0,
+    // Map mode to timer_mode: 'game' or 'cartoon' (youtube/good are cartoons)
+    const timerMode = m === 'game' ? 'game' : 'cartoon'
+    
+    try {
+      // CRITICAL: Update Supabase FIRST (server is source of truth)
+      await supabase
+        .from('profiles')
+        .update({
+          timer_status: 'running',
+          timer_mode: timerMode,
+          timer_start_at: now,
+          // Preserve seconds_today (don't reset on start)
+        })
+        .eq('id', pilotId)
+      
+      // After DB update succeeds, update local state
+      set((s) => ({
+        pilots: {
+          ...s.pilots,
+          [pilotId]: {
+            status: 'RUNNING',
+            sessionMinutes: 0,
+            burnerActive: true,
+            mode: m,
+            sessionStartAt: now,
+            lastBurnAt: now,
+            sessionBalanceAtStart: balanceAtStart,
+            activeSessionId: null,
+            sessionTotalBurned: 0,
+            timerStatus: 'running',
+            timerStartAt: now,
+            secondsToday: 0, // Will be loaded from DB on next sync
+          },
         },
-      },
-    }))
-    get().createSessionTransaction(pilotId, m)
+      }))
+      get().createSessionTransaction(pilotId, m)
+    } catch (e) {
+      console.error('startTimer sync:', e)
+      throw e // Re-throw so caller can handle error
+    }
+  },
+
+  // Legacy alias for backward compatibility
+  startEngine: (pilotId, mode = 'game') => {
+    get().startTimer(pilotId, mode)
+  },
+
+  pauseTimer: (pilotId) => {
+    const state = get()
+    const pilot = state.pilots?.[pilotId]
+    if (!pilot || pilot.status !== 'RUNNING') return
+    
+    // CRITICAL: Calculate elapsed from server state, then update DB
     ;(async () => {
       try {
+        // Get current timer state from DB (source of truth)
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('seconds_today, timer_start_at')
+          .eq('id', pilotId)
+          .single()
+        
+        const currentSecondsToday = Number(profile?.seconds_today ?? 0)
+        let elapsedSeconds = 0
+        
+        // Calculate elapsed: NOW() - timer_start_at
+        if (profile?.timer_start_at) {
+          const now = new Date()
+          const timerStartAt = new Date(profile.timer_start_at)
+          elapsedSeconds = Math.floor((now.getTime() - timerStartAt.getTime()) / 1000)
+        }
+        
+        const newSecondsToday = currentSecondsToday + elapsedSeconds
+        
+        // Update DB: status='paused', seconds_today += elapsed, timer_start_at=null
         await supabase
           .from('profiles')
           .update({
-            session_start_at: now,
-            last_burn_at: now,
-            session_mode: m,
-            session_balance_at_start: balanceAtStart,
+            timer_status: 'paused',
+            seconds_today: newSecondsToday,
+            timer_start_at: null,
           })
           .eq('id', pilotId)
+        
+        // Update local state after DB update
+        set((state) => ({
+          pilots: {
+            ...state.pilots,
+            [pilotId]: { 
+              ...state.pilots[pilotId], 
+              status: 'PAUSED', 
+              burnerActive: false,
+              timerStatus: 'paused',
+              timerStartAt: null,
+              secondsToday: newSecondsToday,
+            },
+          },
+        }))
       } catch (e) {
-        console.error('startEngine sync:', e)
+        console.error('pauseTimer sync:', e)
       }
     })()
   },
 
-  pauseEngine: (pilotId) =>
-    set((state) => ({
-      pilots: {
-        ...state.pilots,
-        [pilotId]: { ...state.pilots[pilotId], status: 'PAUSED', burnerActive: false },
-      },
-    })),
+  // Legacy alias for backward compatibility
+  pauseEngine: (pilotId) => {
+    get().pauseTimer(pilotId)
+  },
 
-  resumeEngine: (pilotId) =>
-    set((state) => ({
-      pilots: {
-        ...state.pilots,
-        [pilotId]: { ...state.pilots[pilotId], status: 'RUNNING', burnerActive: true },
-      },
-    })),
+  resumeTimer: (pilotId) => {
+    const state = get()
+    const pilot = state.pilots?.[pilotId]
+    if (!pilot || pilot.status !== 'PAUSED') return
+    
+    const now = new Date().toISOString()
+    
+    // CRITICAL: Update DB first
+    ;(async () => {
+      try {
+        // Get timer_mode from DB to preserve it
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('timer_mode, seconds_today')
+          .eq('id', pilotId)
+          .single()
+        
+        const timerMode = profile?.timer_mode ?? 'game'
+        const secondsToday = Number(profile?.seconds_today ?? 0)
+        
+        // Update DB: status='running', timer_start_at=NOW()
+        await supabase
+          .from('profiles')
+          .update({
+            timer_status: 'running',
+            timer_start_at: now,
+            timer_mode: timerMode,
+          })
+          .eq('id', pilotId)
+        
+        // Update local state after DB update
+        set((state) => ({
+          pilots: {
+            ...state.pilots,
+            [pilotId]: { 
+              ...state.pilots[pilotId], 
+              status: 'RUNNING', 
+              burnerActive: true,
+              sessionStartAt: now,
+              timerStatus: 'running',
+              timerStartAt: now,
+              secondsToday: secondsToday,
+            },
+          },
+        }))
+      } catch (e) {
+        console.error('resumeTimer sync:', e)
+      }
+    })()
+  },
 
-  stopEngine: (pilotId) => {
+  // Legacy alias for backward compatibility
+  resumeEngine: (pilotId) => {
+    get().resumeTimer(pilotId)
+  },
+
+  stopTimer: (pilotId) => {
     const state = get()
     const pilot = state.pilots?.[pilotId]
     if (!pilot || pilot.status === 'IDLE') return
-    get().finalizeSessionTransaction(pilotId)
+    
+    // CRITICAL: Calculate elapsed from server state, then update DB and trigger burn
     ;(async () => {
       try {
+        // Get current timer state from DB (source of truth)
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('seconds_today, timer_status, timer_start_at, timer_mode')
+          .eq('id', pilotId)
+          .single()
+        
+        const currentSecondsToday = Number(profile?.seconds_today ?? 0)
+        let finalSecondsToday = currentSecondsToday
+        let elapsedSeconds = 0
+        
+        // Calculate elapsed if timer was running (not already paused)
+        if (profile?.timer_status === 'running' && profile?.timer_start_at) {
+          const now = new Date()
+          const timerStartAt = new Date(profile.timer_start_at)
+          elapsedSeconds = Math.floor((now.getTime() - timerStartAt.getTime()) / 1000)
+          finalSecondsToday = currentSecondsToday + elapsedSeconds
+        }
+        
+        const timerMode = profile?.timer_mode ?? 'game'
+        const totalMinutes = Math.floor(finalSecondsToday / 60)
+        
+        // Update DB: status='idle', timer_start_at=null, seconds_today=total
         await supabase
           .from('profiles')
-          .update({ session_start_at: null, last_burn_at: null, session_mode: null, session_balance_at_start: null })
+          .update({ 
+            timer_status: 'idle',
+            timer_mode: null,
+            timer_start_at: null,
+            seconds_today: finalSecondsToday,
+            session_start_at: null, 
+            last_burn_at: null, 
+            session_mode: null, 
+            session_balance_at_start: null 
+          })
           .eq('id', pilotId)
+        
+        // Finalize session transaction (per-minute burns already happened during session)
+        get().finalizeSessionTransaction(pilotId)
+        
+        // Note: Burn transactions are handled per-minute during the session via updateSessionBurn
+        // This stopTimer just clears the timer state and finalizes the session
+        
+        // Update local state after DB update
+        set((state) => ({
+          pilots: {
+            ...state.pilots,
+            [pilotId]: initialPilotState(),
+          },
+        }))
       } catch (e) {
-        console.error('stopEngine sync:', e)
+        console.error('stopTimer sync:', e)
       }
     })()
+  },
+
+  // Legacy alias for backward compatibility
+  stopEngine: (pilotId) => {
+    get().stopTimer(pilotId)
   },
 
   toggleAll: (action, mode = 'game') => {
     if (action === 'start') {
-      const state = get()
-      const romaBalance = state.users.find((u) => u.id === 'roma')?.balance ?? 0
-      const kirillBalance = state.users.find((u) => u.id === 'kirill')?.balance ?? 0
-      const now = new Date().toISOString()
-      const m = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
-      set((s) => ({
-        pilots: {
-          ...s.pilots,
-          roma: {
-            status: 'RUNNING',
-            sessionMinutes: 0,
-            burnerActive: true,
-            mode: m,
-            sessionStartAt: now,
-            lastBurnAt: now,
-            sessionBalanceAtStart: Math.max(0, romaBalance),
-            activeSessionId: null,
-            sessionTotalBurned: 0,
-          },
-          kirill: {
-            status: 'RUNNING',
-            sessionMinutes: 0,
-            burnerActive: true,
-            mode: m,
-            sessionStartAt: now,
-            lastBurnAt: now,
-            sessionBalanceAtStart: Math.max(0, kirillBalance),
-            activeSessionId: null,
-            sessionTotalBurned: 0,
-          },
-        },
-      }))
-      get().createSessionTransaction('roma', m)
-      get().createSessionTransaction('kirill', m)
-      ;(async () => {
-        try {
-          await Promise.all([
-            supabase
-              .from('profiles')
-              .update({
-                session_start_at: now,
-                last_burn_at: now,
-                session_mode: m,
-                session_balance_at_start: Math.max(0, romaBalance),
-              })
-              .eq('id', 'roma'),
-            supabase
-              .from('profiles')
-              .update({
-                session_start_at: now,
-                last_burn_at: now,
-                session_mode: m,
-                session_balance_at_start: Math.max(0, kirillBalance),
-              })
-              .eq('id', 'kirill'),
-          ])
-        } catch (e) {
-          console.error('toggleAll start sync:', e)
-        }
-      })()
+      get().startEngine('roma', mode)
+      get().startEngine('kirill', mode)
     } else if (action === 'pause') {
-      set((state) => ({
-        pilots: {
-          ...state.pilots,
-          roma: { ...state.pilots.roma, status: 'PAUSED', burnerActive: false },
-          kirill: { ...state.pilots.kirill, status: 'PAUSED', burnerActive: false },
-        },
-      }))
+      get().pauseEngine('roma')
+      get().pauseEngine('kirill')
     } else if (action === 'stop') {
       get().stopEngine('roma')
       get().stopEngine('kirill')
@@ -797,7 +928,14 @@ export const useAppStore = create((set, get) => ({
             PILOT_IDS.map((id) =>
               supabase
                 .from('profiles')
-                .update({ today_game_time: 0, today_media_time: 0 })
+                .update({ 
+                  today_game_time: 0, 
+                  today_media_time: 0,
+                  seconds_today: 0,
+                  timer_status: 'idle',
+                  timer_mode: null,
+                  timer_start_at: null,
+                })
                 .eq('id', id)
             )
           )
@@ -826,14 +964,27 @@ export const useAppStore = create((set, get) => ({
       for (const row of profiles) {
         const pilotId = row.id
         if (!PILOT_IDS.includes(pilotId)) continue
+        
+        // Load server-authoritative timer state
+        const timerStatus = row.timer_status ?? 'idle'
+        const timerMode = row.timer_mode ?? null
+        const timerStartAt = row.timer_start_at ?? null
+        const secondsToday = Number(row.seconds_today ?? 0)
+        
         const sessionStartAt = row.session_start_at ?? null
         const lastBurnAt = row.last_burn_at ?? null
         const sessionMode = row.session_mode ?? 'game'
 
-        if (!sessionStartAt) {
+        // If timer_status is idle, initialize empty state
+        if (timerStatus === 'idle' && !sessionStartAt) {
           nextPilots[pilotId] = { ...initialPilotState() }
           continue
         }
+        
+        // Map timer_mode back to session mode for compatibility
+        const effectiveMode = timerMode === 'cartoon' 
+          ? (sessionMode === 'good' ? 'good' : 'youtube')
+          : (sessionMode === 'game' ? 'game' : sessionMode)
 
         const startMs = new Date(sessionStartAt).getTime()
         const actualElapsedMinutes = (now - startMs) / 60000
@@ -877,19 +1028,31 @@ export const useAppStore = create((set, get) => ({
           }
         }
 
+        // Determine status from timer_status
+        const pilotStatus = timerStatus === 'running' ? 'RUNNING' 
+          : timerStatus === 'paused' ? 'PAUSED' 
+          : 'IDLE'
+        
+        // Use timer_start_at if available, otherwise fall back to session_start_at
+        const effectiveStartAt = timerStartAt ?? sessionStartAt
+        
         set((s) => ({
           pilots: {
             ...s.pilots,
             [pilotId]: {
-              status: 'RUNNING',
+              status: pilotStatus,
               sessionMinutes,
-              burnerActive: true,
-              mode: sessionMode === 'youtube' ? 'youtube' : sessionMode === 'good' ? 'good' : 'game',
-              sessionStartAt,
+              burnerActive: pilotStatus === 'RUNNING',
+              mode: effectiveMode,
+              sessionStartAt: effectiveStartAt ?? sessionStartAt,
               lastBurnAt: lastBurnAt ?? sessionStartAt,
               sessionBalanceAtStart: balanceAtStart,
               activeSessionId,
               sessionTotalBurned,
+              // Store server timer state for UI calculation
+              timerStatus,
+              timerStartAt,
+              secondsToday: secondsToday,
             },
           },
         }))
@@ -1000,6 +1163,58 @@ export const useAppStore = create((set, get) => ({
   /** Set users (e.g. from realtime). Keeps shape { id, name, balance, color }. */
   setUsers: (users) => set({ users }),
 
+  /** Sync timer state from DB profile changes (for real-time multi-device sync). */
+  /**
+   * Sync timer state from Supabase profile row (called by realtime subscription).
+   * This ensures instant updates when timer is started/paused/stopped on another device.
+   * Updates local pilots state with server-authoritative timer fields.
+   */
+  syncTimerStateFromProfile: (profileRow) => {
+    const pilotId = profileRow.id
+    if (!PILOT_IDS.includes(pilotId)) return
+    
+    // Extract timer fields from database row
+    const timerStatus = profileRow.timer_status ?? 'idle'
+    const timerMode = profileRow.timer_mode ?? null
+    const timerStartAt = profileRow.timer_start_at ?? null
+    const secondsToday = Number(profileRow.seconds_today ?? 0)
+    
+    const state = get()
+    const pilot = state.pilots?.[pilotId]
+    
+    // Map timer_status ('idle'|'running'|'paused') to pilot status ('IDLE'|'RUNNING'|'PAUSED')
+    const pilotStatus = timerStatus === 'running' ? 'RUNNING' 
+      : timerStatus === 'paused' ? 'PAUSED' 
+      : 'IDLE'
+    
+    // Map timer_mode ('game'|'cartoon') back to session mode ('game'|'youtube'|'good')
+    const sessionMode = timerMode === 'cartoon' 
+      ? (pilot?.mode === 'good' ? 'good' : 'youtube')
+      : (timerMode === 'game' ? 'game' : pilot?.mode ?? 'game')
+    
+    // Update local state immediately (triggers UI re-render)
+    set((s) => {
+      const currentPilot = s.pilots?.[pilotId]
+      if (!currentPilot && pilotStatus === 'IDLE') return s // No need to create idle state
+      
+      return {
+        pilots: {
+          ...s.pilots,
+          [pilotId]: {
+            ...(currentPilot ?? initialPilotState()),
+            status: pilotStatus,
+            burnerActive: pilotStatus === 'RUNNING',
+            mode: pilotStatus !== 'IDLE' ? sessionMode : (currentPilot?.mode ?? null),
+            sessionStartAt: timerStartAt ?? currentPilot?.sessionStartAt ?? null,
+            timerStatus, // Server-authoritative timer status
+            timerStartAt, // Server timestamp when current segment started
+            secondsToday: secondsToday, // Accumulated seconds (excluding current run)
+          },
+        },
+      }
+    })
+  },
+
   /**
    * Apply raid boss damage when XP is earned.
    * Uses optimistic update, then syncs with Supabase settings (key: raid_progress).
@@ -1048,7 +1263,8 @@ export const useAppStore = create((set, get) => ({
     })()
   },
 
-  addPoints: (userId, amount, reason) => {
+  // skipBoss: true — не трогаем Raid Boss (для возвратов и т.п.)
+  addPoints: (userId, amount, reason, skipBoss = false) => {
     const num = Math.abs(Number(amount))
     if (!num || num <= 0) return
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -1081,8 +1297,8 @@ export const useAppStore = create((set, get) => ({
         const user = get().users.find((u) => u.id === userId)
         await supabase.from('profiles').update({ balance: user?.balance ?? 0 }).eq('id', userId)
 
-        // Raid Boss: apply net positive XP as damage.
-        get().damageBoss(num)
+        // Raid Boss: apply net positive XP as damage (если не пропущено флагом).
+        if (!skipBoss) get().damageBoss(num)
         if (txRow) {
           set((state) => ({
             transactions: state.transactions.map((t) =>
@@ -1201,6 +1417,48 @@ export const useAppStore = create((set, get) => ({
         console.warn('logWheelWin sync (optional):', e)
       }
     })()
+  },
+
+  /**
+   * Wheel of Fortune: track spin history and daily limits.
+   * Keeps a short global history (last 10 spins) and per-pilot counters for today's spins.
+   */
+  addWheelSpin: (pilotId, prize) => {
+    const today = getDateKey()
+    const now = Date.now()
+    const entry = {
+      pilotId,
+      itemName: prize?.label ?? '',
+      type: prize?.type ?? 'item',
+      timestamp: now,
+      icon: prize?.icon ?? null,
+    }
+
+    set((state) => {
+      // Ensure spinsUsedToday is for today
+      const currentSpins = state.spinsUsedToday ?? { date: today, roma: 0, kirill: 0 }
+      const spins =
+        currentSpins.date === today
+          ? currentSpins
+          : { date: today, roma: 0, kirill: 0 }
+
+      const key = pilotId === 'roma' ? 'roma' : 'kirill'
+      const updatedSpins = {
+        ...spins,
+        [key]: (spins[key] ?? 0) + 1,
+      }
+
+      // Append to global history; keep only last 10 entries
+      const prevHistory = state.spinHistory ?? []
+      const nextHistory = [...prevHistory, entry]
+      const limitedHistory =
+        nextHistory.length > 10 ? nextHistory.slice(nextHistory.length - 10) : nextHistory
+
+      return {
+        spinsUsedToday: updatedSpins,
+        spinHistory: limitedHistory,
+      }
+    })
   },
 
   removeTransaction: (transactionId) => {

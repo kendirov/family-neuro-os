@@ -59,7 +59,8 @@ export function GamingProtocol() {
   const stopAndRefund = () => {
     if (intervalRef.current) clearInterval(intervalRef.current)
     const remainingMinutes = Math.ceil(secondsRemaining / 60)
-    userIds.forEach((id) => addPoints(id, remainingMinutes, 'Возврат за игру'))
+    // Возврат за неиспользованные минуты: баланс вернуть, босс не должен получать урон.
+    userIds.forEach((id) => addPoints(id, remainingMinutes, 'Возврат за игру', true))
     setScreen('setup')
     setPlayerChoice(null)
     setMinutes(30)

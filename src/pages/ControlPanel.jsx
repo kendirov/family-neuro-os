@@ -27,21 +27,27 @@ function UserColumn({ user, onShowToast }) {
   const spendPoints = useAppStore((s) => s.spendPoints)
   const style = USER_COLORS[user.color] || USER_COLORS.cyan
   const [manualAmount, setManualAmount] = useState('')
+  const [isProcessing, setIsProcessing] = useState(false)
 
   const showToast = (message, variant = 'success') => {
     onShowToast?.({ message, variant })
   }
 
   const handleActivityClick = (activity) => {
+    if (isProcessing) return
+    setIsProcessing(true)
     addPoints(user.id, activity.credits, activity.label)
     playCoin()
     showToast(`+${activity.credits} — ${activity.label}`, style.accent)
+    setTimeout(() => setIsProcessing(false), 500)
   }
 
   const handleManualApply = (delta) => {
+    if (isProcessing) return
     const value = Number(manualAmount)
     if (Number.isNaN(value) || value === 0) return
     const amount = Math.abs(value)
+    setIsProcessing(true)
     if (delta === 'add') {
       addPoints(user.id, amount, 'Ручное изменение')
       playCoin()
@@ -51,6 +57,7 @@ function UserColumn({ user, onShowToast }) {
       showToast(`−${amount}`, style.accent)
     }
     setManualAmount('')
+    setTimeout(() => setIsProcessing(false), 500)
   }
 
   return (
@@ -69,6 +76,7 @@ function UserColumn({ user, onShowToast }) {
             key={activity.id}
             type="button"
             onClick={() => handleActivityClick(activity)}
+            disabled={isProcessing}
             className={`
               min-h-[52px] sm:min-h-[56px] md:min-h-[64px] rounded-lg border font-mono text-left px-2.5 sm:px-3 py-2.5 sm:py-3
               transition-all duration-150 touch-manipulation select-none
@@ -100,6 +108,7 @@ function UserColumn({ user, onShowToast }) {
           <button
             type="button"
             onClick={() => handleManualApply('add')}
+            disabled={isProcessing}
             className="min-h-[48px] min-w-[48px] rounded-lg border border-roma/50 bg-roma/20 text-roma font-mono font-bold text-xl hover:bg-roma/30 active:scale-95 transition touch-manipulation"
             aria-label="Добавить баллы"
           >
@@ -108,6 +117,7 @@ function UserColumn({ user, onShowToast }) {
           <button
             type="button"
             onClick={() => handleManualApply('sub')}
+            disabled={isProcessing}
             className="min-h-[48px] min-w-[48px] rounded-lg border border-alert/50 bg-alert/20 text-alert font-mono font-bold text-xl hover:bg-alert/30 active:scale-95 transition touch-manipulation"
             aria-label="Снять баллы"
           >
