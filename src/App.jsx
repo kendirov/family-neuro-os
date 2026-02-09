@@ -10,8 +10,15 @@ function App() {
   const fetchState = useAppStore((s) => s.fetchState)
   const checkDailyReset = useAppStore((s) => s.checkDailyReset)
 
+  // Load data from Supabase, then subscribe to Realtime so timer state syncs across tabs/devices
   useEffect(() => {
-    fetchState()
+    let unsubscribeRealtime = null
+    fetchState().then(() => {
+      unsubscribeRealtime = useAppStore.getState().subscribeToRealtime?.() ?? null
+    })
+    return () => {
+      if (typeof unsubscribeRealtime === 'function') unsubscribeRealtime()
+    }
   }, [fetchState])
 
   useEffect(() => {

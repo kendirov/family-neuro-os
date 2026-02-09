@@ -1269,60 +1269,52 @@ export const useAppStore = create((set, get) => ({
   },
 
   /**
-   * Supabase Realtime: subscribe to profiles updates for instant timer sync.
-   * Listens for UPDATEs on public.profiles and immediately syncs:
-   * - users list (balance, name, color)
-   * - pilots' timer fields (timer_status, timer_start_at, seconds_today, timer_mode)
-   *
-   * IMPORTANT: protects against race conditions by ignoring "older" payloads
-   * where seconds_today is lower than our local paused secondsToday.
-   *
-   * Returns an unsubscribe function that removes the channel.
+   * Supabase Realtime: subscribe to profiles for timer sync.
+   * "Gentle" subscription: no removeAllChannels(); skip if already connected/connecting
+   * so React Strict Mode double-mount does not kill the first handshake.
    */
   subscribeToRealtime: () => {
+    const state = get()
+    if (state.realtimeStatus === 'connected' || state.realtimeStatus === 'connecting') {
+      console.log('[Realtime] Already subscribed, skipping init.')
+      return () => {}
+    }
+
+    set({ realtimeStatus: 'connecting' })
+    console.log('[Realtime] Init subscription...')
     const syncTimerStateFromProfile = get().syncTimerStateFromProfile
 
-    // Mark as connecting so UI can show small sync indicator
-    set({ realtimeStatus: 'connecting' })
-
     const channel = supabase
-      .channel('public:profiles')
+      .channel('room_1')
       .on(
         'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-        },
+        { event: '*', schema: 'public', table: 'profiles' },
         (payload) => {
-          const row = payload.new
-          if (!row) return
+          console.log('[Realtime] Update:', payload.eventType, payload)
+          const newProfile = payload.new
+          const eventType = payload.eventType
 
+          if ((eventType !== 'UPDATE' && eventType !== 'INSERT') || !newProfile) return
+
+          const row = newProfile
           const pilotId = row.id
-          if (!PILOT_IDS.includes(pilotId)) {
+          if (!PILOT_IDS.includes(pilotId)) return
+
+          const incomingSeconds = Number(row.seconds_today ?? 0)
+          const localState = get()
+          const localPilot = localState.pilots?.[pilotId]
+          const localSeconds = localPilot?.secondsToday ?? 0
+          if (
+            localPilot &&
+            localPilot.timerStatus === 'paused' &&
+            incomingSeconds < localSeconds
+          ) {
             return
           }
 
-           // Защита от гонок: если локально уже пауза с бОльшим временем,
-           // не даём более старому состоянию из БД затереть store.
-           const incomingSeconds = Number(row.seconds_today ?? 0)
-           const localState = get()
-           const localPilot = localState.pilots?.[pilotId]
-           const localSeconds = localPilot?.secondsToday ?? 0
-
-           if (
-             localPilot &&
-             localPilot.timerStatus === 'paused' &&
-             incomingSeconds < localSeconds
-           ) {
-             // Игнорируем устаревшее событие
-             return
-           }
-
-          // Update users collection (balance, name, color) from latest profile row
-          set((state) => {
+          set((s) => {
             const updatedUser = profileToUser(row)
-            const current = state.users ?? []
+            const current = s.users ?? []
             const exists = current.some((u) => u.id === updatedUser.id)
             return {
               users: exists
@@ -1331,49 +1323,36 @@ export const useAppStore = create((set, get) => ({
             }
           })
 
-          // CRITICAL: sync pilot timer state immediately from DB
           syncTimerStateFromProfile(row)
         }
       )
-      .subscribe(async (status, err) => {
-        console.log('[Realtime] Channel status:', status, err)
+      .subscribe((status, err) => {
+        console.log('[Realtime] Status:', status, err ?? '')
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Subscribed to public.profiles updates')
           set({ realtimeStatus: 'connected' })
-          
-          // CRITICAL: Immediately sync current timer state from DB after subscription
-          // This ensures Device B gets correct state right away, not just future updates
-          try {
-            const { data: profiles } = await supabase
-              .from('profiles')
-              .select('*')
-              .in('id', PILOT_IDS)
-            
-            if (profiles) {
-              profiles.forEach((profile) => {
-                if (PILOT_IDS.includes(profile.id)) {
-                  syncTimerStateFromProfile(profile)
-                }
-              })
-              console.log('[Realtime] ✅ Synced current timer state from DB')
-            }
-          } catch (syncErr) {
-            console.error('[Realtime] Failed to sync current state:', syncErr)
-          }
+          supabase
+            .from('profiles')
+            .select('*')
+            .in('id', PILOT_IDS)
+            .then(({ data: profiles }) => {
+              if (profiles) {
+                profiles.forEach((profile) => {
+                  if (PILOT_IDS.includes(profile.id)) syncTimerStateFromProfile(profile)
+                })
+                console.log('[Realtime] ✅ Synced current timer state from DB')
+              }
+            })
+            .catch((syncErr) => console.error('[Realtime] Failed to sync current state:', syncErr))
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || err) {
-          console.error('[Realtime] ❌ Channel error:', status, err)
+          console.error('[Realtime] Connection Error:', err)
           set({ realtimeStatus: 'error' })
         } else if (status === 'CLOSED') {
-          console.log('[Realtime] Channel closed')
           set({ realtimeStatus: 'idle' })
-        } else {
-          // Other statuses like 'JOINING', 'JOINED' - keep as connecting
-          console.log('[Realtime] Channel status:', status)
         }
       })
 
-    // Expose cleanup to callers (Dashboard/App)
     return () => {
+      console.log('[Realtime] Cleaning up channel...')
       supabase.removeChannel(channel)
       set({ realtimeStatus: 'idle' })
     }

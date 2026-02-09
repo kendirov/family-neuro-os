@@ -18,7 +18,11 @@ function normalizeTask(raw, isDaily = true) {
   }
 }
 
-/** Single compact task button (used in grids). Optional inline Undo (X) when completed and daily. */
+/**
+ * Single compact task button (used in grids). Optional inline Undo (X) when completed and daily.
+ * CRITICAL: Outer element is <motion.div role="button">, NOT <button>, so the inner Undo <button>
+ * is valid HTML (no button-inside-button). Prevents hydration errors and console warnings.
+ */
 function TaskButton({
   task,
   status,
@@ -39,6 +43,12 @@ function TaskButton({
     // Main action is disabled for completed tasks or when column is locked/read-only
     if (completed || disabled) return
     onComplete(task, e)
+  }
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleClick(e)
+    }
   }
   const handleUndoClick = (e) => {
     e.stopPropagation()
@@ -92,14 +102,13 @@ function TaskButton({
       : 'h-auto min-h-[42px] px-1 py-2 rounded-xl text-[11px]'
 
   return (
-    <motion.button
-      type="button"
+    <motion.div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
       onClick={handleClick}
-      // IMPORTANT: do NOT disable button just because it's completed,
-      // otherwise nested Undo button will never receive click events.
-      disabled={disabled}
+      onKeyDown={handleKeyDown}
       className={cn(
-        'relative border-2 flex items-center justify-center gap-1.5 font-sans font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal text-center leading-tight break-words',
+        'relative border-2 flex items-center justify-center gap-1.5 font-sans font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal text-center leading-tight break-words cursor-pointer',
         sizeClass,
         // Default state styling
         !completed && defaultBorderClass,
@@ -119,6 +128,7 @@ function TaskButton({
       whileTap={!completed && !disabled ? { scale: 0.97 } : undefined}
       whileHover={!completed && !disabled ? { scale: 1.02 } : undefined}
       aria-pressed={completed}
+      aria-disabled={disabled}
       aria-label={completed ? `${task.label} — выполнено` : `${task.label} — ${task.credits >= 0 ? '+' : ''}${task.credits} XP`}
     >
       {/* Undo icon: ONLY show if user has edit permissions (not disabled/read-only) */}
@@ -169,7 +179,7 @@ function TaskButton({
       >
         {task.credits >= 0 ? `+${task.credits}` : task.credits}
       </span>
-    </motion.button>
+    </motion.div>
   )
 }
 
@@ -179,16 +189,25 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
   const modTasks = modifiers.map((m) => normalizeTask(m, true))
   const mainCompleted = getStatus(main.id) === 'completed'
 
+  const handleMainClick = (e) => {
+    if (!mainCompleted && !disabled) onTaskComplete(mainTask, e)
+  }
+  const handleMainKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleMainClick(e)
+    }
+  }
+
   return (
     <div className="rounded-lg border-2 border-orange-500/50 bg-slate-800/80 overflow-hidden flex flex-col gap-0.5">
-      <motion.button
-        type="button"
-        onClick={(e) => !mainCompleted && !disabled && onTaskComplete(mainTask, e)}
-        // keep column-level disabled, but do NOT disable just because completed,
-        // so that nested Undo button can still be clicked in commander view
-        disabled={disabled}
+      <motion.div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        onClick={handleMainClick}
+        onKeyDown={handleMainKeyDown}
         className={cn(
-          'relative w-full h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-1.5 font-sans text-[9px] font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal leading-tight break-words',
+          'relative w-full h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-1.5 font-sans text-[9px] font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal leading-tight break-words cursor-pointer',
           modTasks.length > 0 ? 'rounded-t-lg' : 'rounded-lg',
           mainCompleted
             ? 'bg-slate-800/60 text-slate-500 opacity-60 grayscale cursor-default'
@@ -230,20 +249,29 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
         >
           +{main.credits}
         </span>
-      </motion.button>
+      </motion.div>
       {modTasks.length > 0 && (
         <div className="flex border-t border-orange-600/20 gap-0.5 px-0.5 pb-0.5">
           {modTasks.map((mod) => {
             const modCompleted = getStatus(mod.id) === 'completed'
+            const handleModClick = (e) => {
+              if (!modCompleted && !disabled) onTaskComplete(mod, e)
+            }
+            const handleModKeyDown = (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleModClick(e)
+              }
+            }
             return (
-              <motion.button
+              <motion.div
                 key={mod.id}
-                type="button"
-                onClick={(e) => !modCompleted && !disabled && onTaskComplete(mod, e)}
-                // do not fully disable when completed to allow nested Undo button
-                disabled={disabled}
+                role="button"
+                tabIndex={disabled ? -1 : 0}
+                onClick={handleModClick}
+                onKeyDown={handleModKeyDown}
                 className={cn(
-                  'relative flex-1 h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-0.5 font-sans text-[9px] font-semibold tabular-nums transition touch-manipulation border-r border-orange-600/20 last:border-r-0 whitespace-normal leading-tight break-words rounded',
+                  'relative flex-1 h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-0.5 font-sans text-[9px] font-semibold tabular-nums transition touch-manipulation border-r border-orange-600/20 last:border-r-0 whitespace-normal leading-tight break-words rounded cursor-pointer',
                   modCompleted
                     ? 'bg-slate-800/70 text-slate-500 opacity-60 grayscale cursor-default'
                     : 'bg-amber-700/30 text-amber-200 hover:bg-amber-700/40'
@@ -265,7 +293,7 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
                 <span aria-hidden className="shrink-0 text-base leading-none">{mod.emoji}</span>
                 <span className="min-w-0 break-words text-center text-[9px] font-sans font-semibold capitalize tracking-wide text-slate-200">{mod.label}</span>
                 <span className="shrink-0 tabular-nums font-sans font-semibold text-[9px] text-amber-300">+{mod.credits}</span>
-              </motion.button>
+              </motion.div>
             )
           })}
         </div>

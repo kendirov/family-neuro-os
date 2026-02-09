@@ -1055,8 +1055,29 @@ function WeeklyAnalytics() {
   )
 }
 
+/** Placeholder column when pilot data is loading or missing — keeps layout intact */
+function PilotColumnPlaceholder({ label, theme = 'purple' }) {
+  const isPurple = theme === 'purple'
+  return (
+    <div
+      className={cn(
+        'relative overflow-hidden rounded-3xl border-2 flex flex-1 flex-col min-w-0 min-h-[320px] p-4 sm:p-5 items-center justify-center',
+        isPurple
+          ? 'bg-gradient-to-b from-purple-900/50 to-slate-900 border-purple-500/30'
+          : 'bg-gradient-to-b from-cyan-900/50 to-slate-900 border-cyan-500/30'
+      )}
+    >
+      <p className={cn('font-gaming text-lg uppercase tracking-wider', isPurple ? 'text-purple-400/80' : 'text-cyan-400/80')}>
+        {label}
+      </p>
+      <p className="font-mono text-xs text-slate-500 mt-1">Загрузка...</p>
+    </div>
+  )
+}
+
 export function Dashboard({ mode = 'pilot' }) {
   const users = useAppStore((s) => s.users)
+  const isLoading = useAppStore((s) => s.isLoading)
   const transactions = useAppStore((s) => s.transactions ?? [])
   const removeTransaction = useAppStore((s) => s.removeTransaction)
   const panelLocked = useAppStore((s) => s.panelLocked)
@@ -1069,15 +1090,7 @@ export function Dashboard({ mode = 'pilot' }) {
   const lastOfflineSyncToast = useAppStore((s) => s.lastOfflineSyncToast)
   const clearLastOfflineSyncToast = useAppStore((s) => s.clearLastOfflineSyncToast)
 
-  // Supabase Realtime: subscribe once per dashboard mount for multi-device timer sync
-  useEffect(() => {
-    const unsubscribe = useAppStore.getState().subscribeToRealtime?.()
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe()
-      }
-    }
-  }, [])
+  // Realtime subscription is handled in App.jsx so timer syncs across tabs and devices
 
   useEffect(() => {
     if (lastOfflineSyncToast) {
@@ -1159,9 +1172,8 @@ export function Dashboard({ mode = 'pilot' }) {
             />
           )}
           <div className="flex flex-col lg:flex-row flex-1 gap-3 min-h-0 min-w-0 overflow-y-auto mt-2">
-            {/* CRITICAL: Kirill LEFT, Roma RIGHT */}
-            {/* CRITICAL: Kirill LEFT, Roma RIGHT */}
-            {kirill && (
+            {/* CRITICAL: Kirill LEFT, Roma RIGHT — always show two columns (real or placeholder) */}
+            {kirill ? (
               <SupplyDepotColumn
                 user={kirill}
                 onShowToast={setToast}
@@ -1172,8 +1184,10 @@ export function Dashboard({ mode = 'pilot' }) {
                 transactions={transactions}
                 onRemoveTransaction={handleRemoveTransaction}
               />
+            ) : (
+              <PilotColumnPlaceholder label="Кирилл" theme="purple" />
             )}
-            {roma && (
+            {roma ? (
               <SupplyDepotColumn
                 user={roma}
                 onShowToast={setToast}
@@ -1184,6 +1198,8 @@ export function Dashboard({ mode = 'pilot' }) {
                 transactions={transactions}
                 onRemoveTransaction={handleRemoveTransaction}
               />
+            ) : (
+              <PilotColumnPlaceholder label="Рома" theme="cyan" />
             )}
           </div>
         </section>

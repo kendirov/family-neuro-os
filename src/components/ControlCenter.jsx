@@ -530,13 +530,14 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
   let dotClasses = 'bg-slate-500'
 
   if (realtimeStatus === 'connecting') {
-    syncLabel = 'Синхронизация...'
+    syncLabel = 'Подключение...'
     syncClasses = 'border-amber-500/60 text-amber-300'
     dotClasses = 'bg-amber-400 animate-pulse'
   } else if (realtimeStatus === 'connected') {
     syncLabel = 'Синхронизировано'
     syncClasses = 'border-emerald-500/60 text-emerald-300'
-    dotClasses = 'bg-emerald-400'
+    // Green pulsing dot as requested
+    dotClasses = 'bg-emerald-400 animate-pulse'
   } else if (realtimeStatus === 'error') {
     syncLabel = 'Нет связи'
     syncClasses = 'border-red-500/70 text-red-300'
