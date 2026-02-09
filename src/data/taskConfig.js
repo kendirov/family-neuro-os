@@ -26,10 +26,9 @@ export const TASK_CONFIG = {
   MORNING_ROUTINE: {
     label: 'УТРО',
     tasks: [
-      { id: 'wake_up', emoji: '⏰', label: 'Проснулся САМ', credits: 30, reason: 'Утро: Проснулся сам' },
-      { id: 'teeth_morning', emoji: '🦷', label: 'Зубы/Умыться', credits: 15, reason: 'Утро: Зубы/Умыться' },
-      { id: 'make_bed', emoji: '🛏', label: 'Убрал постель', credits: 10, reason: 'Утро: Убрал постель' },
-      { id: 'school_leave', emoji: '🎒', label: 'Ушел вовремя', credits: 20, reason: 'Утро: Ушел вовремя' },
+      { id: 'wake_up', emoji: '⏰', label: 'Проснулся сам', credits: 30, reason: 'Режим дня: Проснулся сам' },
+      { id: 'teeth_morning', emoji: '🦷', label: 'Зубы/Умылся', credits: 15, reason: 'Режим дня: Зубы/Умылся' },
+      { id: 'make_bed', emoji: '🛏', label: 'Убрал постель', credits: 10, reason: 'Режим дня: Убрал постель' },
     ],
   },
 
@@ -39,11 +38,15 @@ export const TASK_CONFIG = {
     tasks: [
       { id: 'homework_base', emoji: '📚', label: 'Сделал уроки', credits: 50, reason: 'Школа: Уроки' },
       { id: 'homework_extra', emoji: '🧠', label: 'Доп. занятия', credits: 25, reason: 'Школа: Доп. занятия' },
-      { id: 'grade_5_plus', emoji: '💎', label: 'Оценка 5+', credits: 100, reason: 'Школа: Оценка 5+' },
-      { id: 'grade_5', emoji: '⭐️', label: 'Оценка 5', credits: 70, reason: 'Школа: Оценка 5' },
+      // Routine school prep
+      { id: 'school_leave', emoji: '🎒', label: 'Ушел вовремя', credits: 20, reason: 'Школа: Ушел вовремя' },
+      { id: 'pack_bag', emoji: '🎒', label: 'Собрал портфель', credits: 15, reason: 'Школа: Собрал портфель' },
+      // Grades (repeatable)
+      { id: 'grade_5_plus', emoji: '💎', label: 'Оценка 5+', credits: 50, reason: 'Школа: Оценка 5+' },
+      { id: 'grade_5', emoji: '⭐️', label: 'Оценка 5', credits: 40, reason: 'Школа: Оценка 5' },
       { id: 'grade_4', emoji: '📘', label: 'Оценка 4', credits: 20, reason: 'Школа: Оценка 4' },
-      { id: 'grade_3', emoji: '🔸', label: 'Оценка 3', credits: -20, type: 'penalty', reason: 'Школа: Оценка 3' },
-      { id: 'grade_2', emoji: '🛑', label: 'Оценка 2', credits: -100, type: 'penalty', reason: 'Школа: Оценка 2' },
+      { id: 'grade_3', emoji: '🔸', label: 'Оценка 3', credits: -10, type: 'penalty', reason: 'Школа: Оценка 3' },
+      { id: 'grade_2', emoji: '🛑', label: 'Оценка 2', credits: -50, type: 'penalty', reason: 'Школа: Оценка 2' },
     ],
   },
 
@@ -52,30 +55,26 @@ export const TASK_CONFIG = {
     label: 'ПИТАНИЕ',
     foodComposite: [
       {
-        main: { id: 'breakfast', emoji: '🍳', label: 'Завтрак', credits: 15, reason: 'Питание: Завтрак' },
-        modifiers: [
-          { id: 'breakfast_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Завтрак: Вовремя' },
-          { id: 'breakfast_many', emoji: '💪', label: 'Много', credits: 10, reason: 'Завтрак: Много' },
-        ],
+        main: { id: 'breakfast', emoji: '🍳', label: 'Завтрак', credits: 20, reason: 'Питание: Завтрак' },
+        modifiers: [],
       },
       {
         main: { id: 'lunch', emoji: '🍔', label: 'Обед', credits: 20, reason: 'Питание: Обед' },
-        modifiers: [
-          { id: 'lunch_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Обед: Вовремя' },
-          { id: 'lunch_many', emoji: '💪', label: 'Много', credits: 10, reason: 'Обед: Много' },
-        ],
+        modifiers: [],
       },
       {
         main: { id: 'snack', emoji: '🍪', label: 'Полдник', credits: 10, reason: 'Питание: Полдник' },
         modifiers: [],
       },
       {
-        main: { id: 'dinner', emoji: '🍲', label: 'Ужин', credits: 15, reason: 'Питание: Ужин' },
-        modifiers: [
-          { id: 'dinner_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Ужин: Вовремя' },
-          { id: 'dinner_many', emoji: '💪', label: 'Много', credits: 10, reason: 'Ужин: Много' },
-        ],
+        main: { id: 'dinner', emoji: '🍲', label: 'Ужин', credits: 20, reason: 'Питание: Ужин' },
+        modifiers: [],
       },
+    ],
+    // Universal nutrition bonuses (small buttons, apply to any meal)
+    bonus: [
+      { id: 'food_all', emoji: '🍽️', label: 'Съел всё', credits: 10, reason: 'Питание: Съел всё' },
+      { id: 'food_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Питание: Вовремя' },
     ],
   },
 
@@ -83,20 +82,18 @@ export const TASK_CONFIG = {
   BASE_MAINTENANCE: {
     label: 'ДОМ И СОН',
     tasks: [
-      { id: 'help_mom', emoji: '🧹', label: 'Помощь маме', credits: 40, reason: 'Дом: Помощь маме' },
-      { id: 'store_trash', emoji: '🛒', label: 'Магазин/Мусор', credits: 20, reason: 'Дом: Магазин/Мусор' },
-      { id: 'prep_bed', emoji: '🛏', label: 'Расстелил постель', credits: 10, reason: 'Дом: Расстелил постель' },
-      { id: 'sleep_time', emoji: '🌙', label: 'Лег вовремя', credits: 30, reason: 'Дом: Лег вовремя' },
+      { id: 'help_clean', emoji: '🧹', label: 'Уборка', credits: 40, reason: 'Дом: Уборка' },
+      { id: 'take_trash', emoji: '🗑️', label: 'Мусор', credits: 20, reason: 'Дом: Мусор' },
+      { id: 'go_store', emoji: '🛒', label: 'Магазин', credits: 30, reason: 'Дом: Магазин' },
+      { id: 'sleep_time', emoji: '🌙', label: 'Спать вовремя', credits: 50, reason: 'Сон: Спать вовремя' },
     ],
   },
 }
 
 /** Legacy penalty box (separate danger zone): Крик, Медленно, Грубость, Драка. */
 export const PENALTY_BOX = [
-  { id: 'shout', emoji: '🗣', label: 'Крик/Спор', credits: -20, reason: 'Штраф: Крик/Спор' },
-  { id: 'slow', emoji: '🐢', label: 'Медленно', credits: -10, reason: 'Штраф: Медленно' },
-  { id: 'rude', emoji: '🤬', label: 'Грубость', credits: -50, reason: 'Штраф: Грубость' },
-  { id: 'fight', emoji: '🥊', label: 'Драка', credits: -100, reason: 'Штраф: Драка' },
+  { id: 'shout_meltdown', emoji: '🗯️', label: 'Крик/Истерика', credits: -50, reason: 'Штраф: Крик/Истерика' },
+  { id: 'mess_room', emoji: '💥', label: 'Бардак', credits: -20, reason: 'Штраф: Бардак' },
 ]
 
 /**

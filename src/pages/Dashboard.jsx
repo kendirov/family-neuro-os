@@ -263,16 +263,35 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
 
   const panelGlow = user.color === 'cyan' ? 'panel-glow-roma' : 'panel-glow-kirill'
 
+  // Solid, vibrant gradients based on pilot theme - NO transparency
+  const columnBgClass = user.color === 'cyan'
+    ? 'bg-gradient-to-b from-cyan-900/90 to-slate-900'
+    : 'bg-gradient-to-b from-purple-900/90 to-slate-900'
+  const columnBorderClass = user.color === 'cyan'
+    ? 'border-cyan-500/50 shadow-2xl shadow-cyan-900/20'
+    : 'border-purple-500/50 shadow-2xl shadow-purple-900/20'
+
   return (
     <div
       className={cn(
-        'flex flex-1 flex-col min-w-0 min-h-[320px] rounded-2xl panel-glass p-4 sm:p-5 border-[3px]',
-        panelGlow,
-        readOnly && 'opacity-80 cursor-default pointer-events-none'
+        'relative overflow-hidden rounded-3xl border-2 flex flex-1 flex-col min-w-0 min-h-[320px] p-4 sm:p-5',
+        columnBgClass,
+        columnBorderClass,
+        readOnly && 'cursor-default pointer-events-none'
       )}
     >
+      {/* Header glow effect - subtle spotlight at top */}
+      <div
+        className={cn(
+          'absolute top-0 left-0 right-0 h-32 pointer-events-none',
+          user.color === 'cyan'
+            ? 'bg-gradient-to-b from-cyan-500/20 to-transparent'
+            : 'bg-gradient-to-b from-purple-500/20 to-transparent'
+        )}
+        aria-hidden
+      />
       {/* Header: Pixel art avatar + name + Wallet (Quick Calculator) trigger */}
-      <div className="flex items-center gap-3 sm:gap-4 mb-3 shrink-0">
+      <div className="flex items-center gap-3 sm:gap-4 mb-3 shrink-0 relative z-10">
         <div className="relative shrink-0">
           <PilotAvatar
             pilotId={user.id}
@@ -291,8 +310,8 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
             </span>
           )}
         </div>
-        <div className="flex-1 min-w-0">
-          <h2 className={cn('hud-player-name', user.color === 'cyan' ? 'text-cyan-300' : 'text-purple-300')}>
+        <div className="flex-1 min-w-0 relative z-10">
+          <h2 className="hud-player-name text-white font-black">
             {theme.name}
           </h2>
         </div>
@@ -325,23 +344,23 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
           .reduce((sum, t) => sum + t.amount, 0)
         const todayEarnedLabel = `${todayEarned >= 0 ? '+' : ''}${todayEarned}`
         return (
-          <div className="mb-3 shrink-0 rounded-2xl border-[3px] border-slate-600/60 bg-slate-800/90 px-4 py-4 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
+          <div className="mb-3 shrink-0 rounded-2xl border-[3px] border-slate-500/70 bg-slate-800/90 px-4 py-4 shadow-[0_4px_16px_rgba(0,0,0,0.6)] relative z-10">
             <div className="flex flex-col gap-2">
               <div className="flex flex-col items-center">
-                <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">
+                <span className="font-sans-data text-[10px] text-white uppercase tracking-wider font-semibold">
                   ЗАРАБОТАНО СЕГОДНЯ
                 </span>
                 <span className="hud-score-earned text-emerald-300 drop-shadow-[0_0_10px_rgba(16,185,129,0.7)]">
                   {todayEarnedLabel}
                 </span>
-                <span className="font-sans-data text-[10px] text-amber-300">⚡ XP</span>
+                <span className="font-sans-data text-[10px] text-amber-300 font-semibold">⚡ XP</span>
               </div>
-              <div className="h-px w-full bg-slate-600/60 rounded-full" aria-hidden />
+              <div className="h-px w-full bg-slate-500/50 rounded-full" aria-hidden />
               <div className="flex items-center justify-between w-full">
-                <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">
+                <span className="font-sans-data text-[10px] text-white uppercase tracking-wider font-semibold">
                   Баланс
                 </span>
-                <span className="hud-score-total flex items-baseline justify-center gap-0.5 text-amber-300/90">
+                <span className="hud-score-total flex items-baseline justify-center gap-0.5 text-amber-300 font-semibold">
                   <CountUpNumber value={user.balance} duration={400} />
                   <span className="font-sans-data text-[10px]">⚡ XP</span>
                 </span>
@@ -352,7 +371,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
       })()}
 
       {/* Chronological Supply Depot: 4 blocks (Morning, School, Food, Home) — scrollable */}
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col relative z-10">
         <SupplyDepotSchedule
           accentColor={user.color === 'cyan' ? 'cyan' : 'purple'}
           userId={user.id}
@@ -372,13 +391,13 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         />
       </div>
 
-      {/* Module D: ⚠️ ШТРАФНОЙ БОКС — Danger zone. Very bottom, distinct from positive tasks. */}
-      <div className="mt-3 pt-3 border-t-2 border-red-900/40 shrink-0">
-        <h3 className="font-mono text-[10px] text-red-400/90 uppercase tracking-wider mb-1.5">
-          ⚠️ ШТРАФНОЙ БОКС
+      {/* Module D: ШТРАФБАТ — Danger zone. Very bottom, distinct from positive tasks. */}
+      <div className="mt-3 pt-3 border-t-2 border-red-700/60 shrink-0 relative z-10">
+        <h3 className="font-gaming text-sm font-black text-red-400 uppercase tracking-wider mb-2">
+          ⚠️ ШТРАФБАТ
         </h3>
-        <div className="danger-zone rounded-2xl p-3 space-y-2">
-          <div className="grid grid-cols-2 gap-1">
+        <div className="rounded-2xl border-2 border-red-600/70 bg-red-900/20 p-3 shadow-[0_0_18px_rgba(220,38,38,0.35)]">
+          <div className="grid grid-cols-2 gap-2">
             {PENALTY_BOX.map((action) => (
               <button
                 key={action.id}
@@ -386,15 +405,15 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
                 onClick={(e) => handlePenaltyClick(action, e)}
                 disabled={effectiveLocked}
                 className={cn(
-                  'rounded-md py-2 px-2 font-mono font-medium border flex items-center justify-center gap-1 min-h-[36px] touch-manipulation',
-                  juicy ? 'btn-juicy-danger btn-arcade-juicy border-b-4' : 'btn-danger-small',
-                  effectiveLocked && 'opacity-60',
-                  juicy && flashId === action.id && 'btn-flash-white-once'
+                  'rounded-lg py-2 px-2 font-mono font-medium border flex items-center justify-center gap-1.5 min-h-[36px] touch-manipulation bg-red-900/40 border-red-500/70 text-red-100',
+                  'hover:bg-red-700/60 hover:border-red-400/80',
+                  juicy && 'btn-flash-white-once',
+                  effectiveLocked && 'opacity-60 cursor-not-allowed'
                 )}
               >
                 <span aria-hidden>{action.emoji}</span>
                 <span className="truncate">{action.label}</span>
-                <span className="tabular-nums text-red-300">{action.credits}</span>
+                <span className="tabular-nums text-red-200">{action.credits}</span>
               </button>
             ))}
           </div>
@@ -402,17 +421,17 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
       </div>
 
       {/* Transaction History — last 50, terminal style, delete with refund */}
-      <div className="mt-3 flex-1 flex flex-col rounded-2xl border-2 border-slate-600/60 bg-slate-900/95 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.3)] min-h-[400px]">
-        <h3 className="font-mono text-[10px] text-slate-500 uppercase tracking-wider px-2 py-1.5 border-b border-slate-700/50 shrink-0">
+      <div className="mt-3 flex-1 flex flex-col rounded-2xl border-2 border-slate-500/70 bg-slate-800/90 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.5)] min-h-[400px] relative z-10">
+        <h3 className="font-mono text-xs text-white uppercase tracking-wider px-3 py-2 border-b border-slate-600/60 shrink-0 font-bold">
           Журнал операций
         </h3>
-        <ul className="font-mono text-[11px] text-slate-400 space-y-0 overflow-y-auto flex-1 min-h-0 max-h-60 px-2 py-1.5 list-none [scrollbar-color:theme(colors.slate.600)_transparent)]">
+        <ul className="font-mono text-[11px] text-white space-y-0 overflow-y-auto flex-1 min-h-0 max-h-60 px-2 py-1.5 list-none [scrollbar-color:theme(colors.slate.600)_transparent]">
           {personalLog.length === 0 ? (
-            <li className="text-slate-600 py-3">— записей нет</li>
+            <li className="text-slate-300 py-3">— записей нет</li>
           ) : (
             orderedDateKeys.map((dateKey) => (
               <li key={dateKey} className="list-none">
-                <div className="sticky top-0 z-10 bg-slate-900/98 py-1 font-mono text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-700/50">
+                <div className="sticky top-0 z-10 bg-slate-800/98 py-1 font-mono text-[10px] text-white uppercase tracking-wider border-b border-slate-600/50 font-semibold">
                   {dateLabel(dateKey)}
                 </div>
                 <ul className="list-none space-y-0">
@@ -428,12 +447,12 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
                     return (
                       <li
                         key={t.id ?? `log-${t.at}-${i}`}
-                        className="flex items-center gap-2 py-1.5 px-1.5 rounded hover:bg-slate-800/60 group border-b border-slate-800/50 last:border-b-0"
+                        className="flex items-center gap-2 py-1.5 px-1.5 rounded hover:bg-slate-700/60 group border-b border-slate-600/40 last:border-b-0"
                       >
-                        <span className="tabular-nums text-slate-500 shrink-0 w-14 text-[10px]">
+                        <span className="tabular-nums text-white shrink-0 w-14 text-[10px] font-medium">
                           {formatTime(t.at)}
                         </span>
-                        <span className="flex-1 truncate text-slate-300 min-w-0 text-[11px]">{t.description}</span>
+                        <span className="flex-1 truncate text-white min-w-0 text-[11px]">{t.description}</span>
                         <span
                           className={cn(
                             'tabular-nums shrink-0 w-10 text-right text-xs font-semibold',

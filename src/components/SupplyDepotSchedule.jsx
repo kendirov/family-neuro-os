@@ -1,6 +1,8 @@
+import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Check, X } from 'lucide-react'
+import { Check, X, Star } from 'lucide-react'
 import { TASK_CONFIG } from '@/data/taskConfig'
+import { TaskGroup } from '@/components/TaskGroup'
 import { cn } from '@/lib/utils'
 
 function normalizeTask(raw, isDaily = true) {
@@ -17,7 +19,18 @@ function normalizeTask(raw, isDaily = true) {
 }
 
 /** Single compact task button (used in grids). Optional inline Undo (X) when completed and daily. */
-function TaskButton({ task, status, onComplete, disabled, accentColor, className, variant = 'default', isDaily = false, onUndo }) {
+function TaskButton({
+  task,
+  status,
+  onComplete,
+  disabled,
+  accentColor,
+  className,
+  variant = 'default',
+  isDaily = false,
+  onUndo,
+  size = 'default', // 'default' | 'small'
+}) {
   const completed = status === 'completed'
   const pending = status === 'pending'
   const isPenalty = task.credits < 0
@@ -31,27 +44,45 @@ function TaskButton({ task, status, onComplete, disabled, accentColor, className
     onUndo(task)
   }
 
-  const borderClass =
-    variant === 'morning'
-      ? 'border-cyan-500/60 hover:border-cyan-400/80'
-      : variant === 'school'
-        ? isPenalty
-          ? 'border-red-500/60 hover:border-red-400/80'
-          : 'border-violet-500/60 hover:border-violet-400/80'
-        : variant === 'base'
-          ? 'border-indigo-500/50 hover:border-indigo-400/70'
-          : 'border-slate-500/60 hover:border-slate-400/80'
+  // Default state: dark background, thin border
+  // Special styling for bonus buttons (variant="base" + size="small") - make them brighter
+  const isBonusButton = variant === 'base' && size === 'small'
+  
+  const defaultBorderClass = isBonusButton
+    ? 'border-amber-500/60 hover:border-amber-400/80'
+    : 'border-slate-600'
+  const defaultBgClass = isBonusButton
+    ? 'bg-amber-500/20 hover:bg-amber-500/30'
+    : 'bg-slate-800'
+  const defaultTextClass = isBonusButton
+    ? 'text-amber-200'
+    : 'text-slate-200'
 
-  const bgClass =
-    variant === 'morning'
-      ? pending && !disabled ? 'bg-cyan-500/15' : 'bg-slate-800/60'
-      : variant === 'school'
-        ? isPenalty
-          ? pending && !disabled ? 'bg-red-500/15' : 'bg-slate-800/60'
-          : pending && !disabled ? 'bg-violet-500/15' : 'bg-slate-800/60'
-        : variant === 'base'
-          ? pending && !disabled ? 'bg-indigo-500/15' : 'bg-slate-800/70'
-          : 'bg-slate-800/60'
+  // Completed state: bright background, solid border, DARK text (high contrast)
+  const completedBorderClass = completed && !isPenalty
+    ? 'border-green-400'
+    : completed && isPenalty
+      ? 'border-red-500'
+      : defaultBorderClass
+
+  const completedBgClass = completed && !isPenalty
+    ? 'bg-green-400'
+    : completed && isPenalty
+      ? 'bg-red-500'
+      : defaultBgClass
+
+  // CRITICAL: Dark text on bright background for readability
+  const completedTextClass = completed
+    ? 'text-slate-900 font-black'
+    : defaultTextClass
+
+  // Size-specific classes - allow buttons to grow, prevent text clipping
+  // Bonus buttons (variant="base" + size="small") get extra compact styling
+  const sizeClass = isBonusButton
+    ? 'h-auto min-h-[32px] px-1 py-2 rounded-full text-[9px]'
+    : size === 'small'
+      ? 'h-auto min-h-[32px] px-1 py-2 rounded-full text-[11px]'
+      : 'h-auto min-h-[42px] px-1 py-2 rounded-xl text-[11px]'
 
   return (
     <motion.button
@@ -59,19 +90,30 @@ function TaskButton({ task, status, onComplete, disabled, accentColor, className
       onClick={handleClick}
       disabled={completed || disabled}
       className={cn(
-        'relative rounded-xl border-2 min-h-[40px] px-2 py-2 flex items-center justify-center gap-1.5 font-gaming text-[10px] font-bold uppercase tracking-wider transition touch-manipulation truncate',
-        borderClass,
-        bgClass,
-        completed && 'opacity-50 grayscale bg-slate-800/50 cursor-default',
-        completed && !isPenalty && 'border-emerald-500/80',
-        completed && isPenalty && 'border-red-500/80',
+        'relative border-2 flex items-center justify-center gap-1.5 font-sans font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal text-center leading-tight break-words',
+        sizeClass,
+        // Default state styling
+        !completed && defaultBorderClass,
+        !completed && defaultBgClass,
+        !completed && defaultTextClass,
+        !completed && !isBonusButton && 'hover:bg-slate-700 hover:border-slate-500 hover:text-slate-100',
+        !completed && isBonusButton && 'hover:bg-amber-500/40 hover:border-amber-400 hover:text-amber-100',
+        // Completed state styling (achievement unlocked)
+        completed && completedBorderClass,
+        completed && completedBgClass,
+        completed && completedTextClass,
+        completed && 'cursor-default',
+        // CRITICAL: Disabled state must maintain 100% vibrancy - no opacity/grayscale
+        disabled && 'opacity-100 cursor-default',
         className
       )}
       whileTap={!completed && !disabled ? { scale: 0.97 } : undefined}
+      whileHover={!completed && !disabled ? { scale: 1.02 } : undefined}
       aria-pressed={completed}
       aria-label={completed ? `${task.label} — выполнено` : `${task.label} — ${task.credits >= 0 ? '+' : ''}${task.credits} XP`}
     >
-      {completed && isDaily && onUndo && (
+      {/* Undo icon: ONLY show if user has edit permissions (not disabled/read-only) */}
+      {completed && isDaily && onUndo && !disabled && (
         <button
           type="button"
           onClick={handleUndo}
@@ -82,31 +124,33 @@ function TaskButton({ task, status, onComplete, disabled, accentColor, className
           <X className="w-4 h-4" strokeWidth={2.5} />
         </button>
       )}
-      {completed && (
-        <span className="absolute top-1 left-1 z-10 flex items-center justify-center pointer-events-none">
+      {/* Achievement icon: Star for rewards, Check for penalties - DARK for contrast */}
+      {completed && size !== 'small' && (
+        <span className="shrink-0 mr-0.5 flex items-center justify-center pointer-events-none">
           {isPenalty ? (
-            <X className="h-3.5 w-3.5 text-red-400 drop-shadow-[0_0_4px_rgba(248,113,113,0.8)]" strokeWidth={2.5} />
+            <X className="w-4 h-4 text-slate-900" strokeWidth={3} />
           ) : (
-            <Check className="h-3.5 w-3.5 text-emerald-400 drop-shadow-[0_0_4px_rgba(52,211,153,0.8)]" strokeWidth={2.5} />
+            <Star className="w-4 h-4 text-slate-900 fill-slate-900" strokeWidth={2} />
           )}
         </span>
       )}
-      <span className="shrink-0" aria-hidden>
+      <span className="shrink-0 text-base leading-none" aria-hidden>
         {task.emoji}
       </span>
-      <span
-        className={cn(
-          'truncate min-w-0',
-          completed && 'line-through'
-        )}
-      >
+      <span className={cn(
+        'min-w-0 leading-tight text-center break-words font-sans',
+        completed 
+          ? 'font-bold text-slate-900' 
+          : 'font-semibold text-slate-200'
+      )}>
         {task.label}
       </span>
       <span
         className={cn(
-          'shrink-0 tabular-nums text-[9px]',
+          'shrink-0 tabular-nums font-sans font-semibold leading-tight',
+          size === 'small' ? 'text-[10px]' : 'text-[11px]',
           completed
-            ? 'line-through text-slate-400/80'
+            ? 'text-slate-900'
             : isPenalty
               ? 'text-red-300'
               : variant === 'base'
@@ -133,7 +177,7 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
         onClick={(e) => !mainCompleted && !disabled && onTaskComplete(mainTask, e)}
         disabled={mainCompleted || disabled}
         className={cn(
-          'relative w-full min-h-[32px] h-8 px-2.5 py-1.5 flex items-center justify-center gap-1.5 font-gaming text-[9px] font-bold uppercase tracking-wider transition touch-manipulation truncate',
+          'relative w-full h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-1.5 font-sans text-[9px] font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal leading-tight break-words',
           modTasks.length > 0 ? 'rounded-t-lg' : 'rounded-lg',
           mainCompleted
             ? 'bg-slate-800/60 text-slate-500 opacity-60 grayscale cursor-default'
@@ -141,7 +185,8 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
         )}
         whileTap={!mainCompleted && !disabled ? { scale: 0.98 } : undefined}
       >
-        {mainCompleted && onUndo && (
+        {/* Undo icon: ONLY show if user has edit permissions (not disabled/read-only) */}
+        {mainCompleted && onUndo && !disabled && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onUndo(mainTask) }}
@@ -157,18 +202,18 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
             <Check className="h-3.5 w-3.5 text-emerald-400 drop-shadow-[0_0_4px_rgba(52,211,153,0.9)]" strokeWidth={2.5} />
           </span>
         )}
-        <span className="shrink-0">{main.emoji}</span>
+        <span className="shrink-0 text-base leading-none">{main.emoji}</span>
         <span
           className={cn(
-            'truncate min-w-0',
-            mainCompleted && 'line-through'
+            'min-w-0 break-words text-center font-sans font-semibold capitalize tracking-wide',
+            mainCompleted ? 'line-through text-slate-500' : 'text-slate-200'
           )}
         >
           {main.shortLabel ?? main.label}
         </span>
         <span
           className={cn(
-            'shrink-0 tabular-nums text-[8px]',
+            'shrink-0 tabular-nums font-sans font-semibold text-[8px]',
             mainCompleted ? 'line-through text-slate-400/80' : 'text-amber-300'
           )}
         >
@@ -186,14 +231,15 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
                 onClick={(e) => !modCompleted && !disabled && onTaskComplete(mod, e)}
                 disabled={modCompleted || disabled}
                 className={cn(
-                  'relative flex-1 h-8 min-h-[32px] px-1.5 py-1 flex items-center justify-center gap-0.5 font-gaming text-[10px] font-bold tabular-nums transition touch-manipulation border-r border-orange-600/20 last:border-r-0 truncate rounded',
+                  'relative flex-1 h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-0.5 font-sans text-[9px] font-semibold tabular-nums transition touch-manipulation border-r border-orange-600/20 last:border-r-0 whitespace-normal leading-tight break-words rounded',
                   modCompleted
                     ? 'bg-slate-800/70 text-slate-500 opacity-60 grayscale cursor-default'
                     : 'bg-amber-700/30 text-amber-200 hover:bg-amber-700/40'
                 )}
                 whileTap={!modCompleted && !disabled ? { scale: 0.98 } : undefined}
               >
-                {modCompleted && onUndo && (
+                {/* Undo icon: ONLY show if user has edit permissions (not disabled/read-only) */}
+                {modCompleted && onUndo && !disabled && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onUndo(mod) }}
@@ -204,9 +250,9 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
                     <X className="w-2.5 h-2.5" strokeWidth={2.5} />
                   </button>
                 )}
-                <span aria-hidden className="shrink-0 text-[10px]">{mod.emoji}</span>
-                <span className="truncate min-w-0 text-[10px]">{mod.label}</span>
-                <span className="shrink-0 tabular-nums text-[9px]">+{mod.credits}</span>
+                <span aria-hidden className="shrink-0 text-base leading-none">{mod.emoji}</span>
+                <span className="min-w-0 break-words text-center text-[9px] font-sans font-semibold capitalize tracking-wide text-slate-200">{mod.label}</span>
+                <span className="shrink-0 tabular-nums font-sans font-semibold text-[9px] text-amber-300">+{mod.credits}</span>
               </motion.button>
             )
           })}
@@ -216,32 +262,18 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
   )
 }
 
-/** Block wrapper: header + distinct border by time-of-day. Optional headerClass for section highlight. */
-function Block({ title, borderClass, headerClass, children, className }) {
-  return (
-    <div className={cn('rounded-xl border-2 overflow-hidden bg-slate-800/70 shadow-[0_2px_8px_rgba(0,0,0,0.25)]', borderClass, className)}>
-      <div className={cn('px-2.5 py-1.5 border-b border-inherit', headerClass ?? 'bg-black/20')}>
-        <h4 className="font-gaming text-[11px] font-bold uppercase tracking-wider text-slate-200">
-          {title}
-        </h4>
-      </div>
-      <div className="p-2">{children}</div>
-    </div>
-  )
-}
-
 /** Grade button config: Trophy Case — fixed square, 5+ gold glow, 3/2 warning style. */
 const GRADE_STYLE = {
   grade_5_plus: {
     num: '5+',
-    xp: 100,
+    xp: 50,
     labelRu: 'Пятерка с плюсом',
     class: 'border-2 border-amber-400 bg-amber-500/30 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.5)] ring-2 ring-amber-400/60',
     textClass: 'font-extrabold',
   },
   grade_5: {
     num: '5',
-    xp: 70,
+    xp: 40,
     labelRu: 'Пятерка',
     class: 'border-2 border-emerald-500 bg-emerald-500/40 text-emerald-50',
     textClass: 'font-black',
@@ -255,14 +287,14 @@ const GRADE_STYLE = {
   },
   grade_3: {
     num: '3',
-    xp: -20,
+    xp: -10,
     labelRu: 'Тройка',
     class: 'border-2 border-orange-600/80 bg-orange-600/25 text-orange-200/90',
     textClass: 'font-bold',
   },
   grade_2: {
     num: '2',
-    xp: -100,
+    xp: -50,
     labelRu: 'Двойка',
     class: 'border-2 border-red-600/80 bg-red-600/25 text-red-200/90',
     textClass: 'font-bold',
@@ -271,136 +303,91 @@ const GRADE_STYLE = {
 const GRADE_ORDER = ['grade_5_plus', 'grade_5', 'grade_4', 'grade_3', 'grade_2']
 
 /**
- * Chronological Supply Depot: 4 blocks (Morning, School, Food, Home).
+ * Chronological Supply Depot: 5 control blocks (Daily Routine, Nutrition, School, Base Support, Penalty Box-style handled in parent).
  * Compact buttons; same getStatus/onTaskComplete contract as MissionLog.
  */
 export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accentColor, userId, onUndoDailyTask }) {
   const morning = TASK_CONFIG.MORNING_ROUTINE.tasks || []
   const school = TASK_CONFIG.SCHOOL_INTELLECT.tasks || []
-  const homework = school.filter((t) => t.id === 'homework_base' || t.id === 'homework_extra')
   const grades = school.filter((t) => t.id.startsWith('grade_'))
   const foodComposite = TASK_CONFIG.NUTRITION.foodComposite || []
+  const foodBonus = TASK_CONFIG.NUTRITION.bonus || []
   const base = TASK_CONFIG.BASE_MAINTENANCE.tasks || []
   const handleUndo = (task) => userId && onUndoDailyTask?.(userId, task)
 
+  // Map into logical control blocks with chronological structure
+  const morningTasks = [
+    morning.find((t) => t.id === 'wake_up'),
+    morning.find((t) => t.id === 'teeth_morning'),
+    morning.find((t) => t.id === 'make_bed'),
+  ].filter(Boolean)
+  
+  const dayTasks = [] // Can add daytime tasks here if needed
+  
+  const eveningTasks = [
+    base.find((t) => t.id === 'sleep_time'),
+  ].filter(Boolean)
+
+  const nutritionMainMeals = foodComposite.filter((row) =>
+    ['breakfast', 'lunch', 'dinner'].includes(row.main.id)
+  )
+  const nutritionSnack = foodComposite.find((row) => row.main.id === 'snack')
+
+  const schoolRoutine = [
+    school.find((t) => t.id === 'school_leave'),
+    school.find((t) => t.id === 'pack_bag'),
+  ].filter(Boolean)
+
+  const baseSupport = [
+    base.find((t) => t.id === 'help_clean'),
+    base.find((t) => t.id === 'take_trash'),
+    base.find((t) => t.id === 'go_store'),
+  ].filter(Boolean)
+
+  // Debounce map for grade buttons (500ms between clicks per grade id, but keep repeatable)
+  const lastGradeClickRef = useRef({})
+  // Ripple animation state per grade button
+  const [gradeRipples, setGradeRipples] = useState({})
+
+  const handleGradeClick = (task, event) => {
+    if (disabled) return
+    const now = Date.now()
+    const last = lastGradeClickRef.current[task.id] || 0
+    if (now - last < 500) {
+      return
+    }
+    lastGradeClickRef.current[task.id] = now
+    
+    // Trigger ripple animation
+    setGradeRipples((prev) => ({ ...prev, [task.id]: Date.now() }))
+    setTimeout(() => {
+      setGradeRipples((prev) => {
+        const next = { ...prev }
+        delete next[task.id]
+        return next
+      })
+    }, 600)
+    
+    onTaskComplete(task, event)
+  }
+
   return (
     <div className="flex flex-col gap-3.5">
-      {/* Block 1: 🌅 НАЧАЛО ДНЯ — Yellow/Cyan */}
-      <Block
-        title="🌅 НАЧАЛО ДНЯ"
-        borderClass="border-amber-400/60 shadow-[0_0_12px_rgba(251,191,36,0.15)]"
+      {/* Block 1: РЕЖИМ ДНЯ — Chronological structure with sub-sections */}
+      <TaskGroup
+        title="РЕЖИМ ДНЯ"
+        titleColor="text-blue-400"
+        headerClass="bg-gradient-to-r from-blue-900/40 to-cyan-900/40 border-b-2 border-blue-500/60"
+        bodyClass="pt-2 space-y-4"
+        className="bg-slate-800/70 border-blue-500/60"
       >
-        <div className="grid grid-cols-2 gap-1.5">
-          {morning.map((t) => (
-            <TaskButton
-              key={t.id}
-              task={normalizeTask(t, true)}
-              status={getStatus(t.id)}
-              onComplete={onTaskComplete}
-              disabled={disabled}
-              accentColor={accentColor}
-              variant="morning"
-              isDaily={true}
-              onUndo={handleUndo}
-            />
-          ))}
-        </div>
-      </Block>
-
-      {/* Block 2: 🏫 АКАДЕМИЯ — Golden/Intelligence highlight; Homework + Trophy Case */}
-      <Block
-        title="🏫 АКАДЕМИЯ"
-        borderClass="border-amber-400/70 shadow-[0_0_16px_rgba(251,191,36,0.2),inset_0_1px_0_rgba(251,191,36,0.08)]"
-        headerClass="bg-amber-500/10 border-amber-400/30"
-      >
-        <div className="space-y-2">
-          {/* Homework: distinct Base (📚) and Extra (🧠) */}
-          <div className="grid grid-cols-2 gap-1.5">
-            {homework.map((t) => (
-              <TaskButton
-                key={t.id}
-                task={normalizeTask(t, false)}
-                status={getStatus(t.id)}
-                onComplete={onTaskComplete}
-                disabled={disabled}
-                accentColor={accentColor}
-                variant="school"
-                isDaily={false}
-                className={t.id === 'homework_base' ? 'bg-violet-500/15 border-violet-500/70' : 'bg-amber-500/10 border-amber-500/50'}
-              />
-            ))}
-          </div>
-          {/* Trophy Case: fixed square grades, centered */}
-          <div>
-            <p className="font-mono text-[9px] text-amber-200/80 uppercase tracking-wider mb-1.5">Оценки</p>
-            <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
-              {GRADE_ORDER.map((gradeId) => {
-                const t = grades.find((g) => g.id === gradeId)
-                if (!t) return null
-                const style = GRADE_STYLE[gradeId]
-                const status = getStatus(t.id)
-                const task = normalizeTask(t, false)
-                const completed = status === 'completed'
-                return (
-                  <motion.button
-                    key={t.id}
-                    type="button"
-                    onClick={(e) => !completed && !disabled && onTaskComplete(task, e)}
-                    disabled={completed || disabled}
-                    className={cn(
-                      'w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex flex-col items-center justify-center gap-0 transition touch-manipulation shrink-0',
-                      style?.class,
-                      completed && 'opacity-50 grayscale border-slate-600/50 bg-slate-800/50 cursor-default'
-                    )}
-                    whileTap={!completed && !disabled ? { scale: 0.96 } : undefined}
-                    aria-label={completed ? `${style?.labelRu} — выполнено` : `${style?.labelRu} — ${style?.xp >= 0 ? '+' : ''}${style?.xp} XP`}
-                  >
-                    <span className={cn('font-gaming text-lg sm:text-xl tabular-nums leading-none', style?.textClass ?? 'font-black')}>
-                      {style?.num ?? t.emoji}
-                    </span>
-                    <span className="font-mono text-[8px] sm:text-[9px] tabular-nums mt-0.5 opacity-90">
-                      {style?.xp >= 0 ? `+${style?.xp}` : style?.xp}
-                    </span>
-                  </motion.button>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      </Block>
-
-      {/* Block 3: 🔋 ТОПЛИВО — Orange; compact Breakfast → Lunch → Snack → Dinner */}
-      <Block
-        title="🔋 ТОПЛИВО"
-        borderClass="border-orange-500/60 shadow-[0_0_12px_rgba(249,115,22,0.15)]"
-      >
-        <div className="space-y-1">
-          {foodComposite.map((row) => (
-            <FoodRow
-              key={row.main.id}
-              main={row.main}
-              modifiers={row.modifiers || []}
-              getStatus={getStatus}
-              onTaskComplete={onTaskComplete}
-              disabled={disabled}
-              onUndo={handleUndo}
-            />
-          ))}
-        </div>
-      </Block>
-
-      {/* Block 4: 🏠 БАЗА И СОН — Evening phase: Indigo/Slate, 2x2 grid */}
-      <div className="mt-4 pt-3 border-t border-slate-600/50">
-        <p className="font-mono text-[9px] text-slate-500 uppercase tracking-widest mb-2 text-center">
-          Вечер
-        </p>
-        <Block
-          title="🏠 БАЗА И СОН"
-          borderClass="border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.12)]"
-          headerClass="bg-indigo-500/10 border-indigo-400/20"
-        >
+        {/* 🌅 Утро Section */}
+        <div>
+          <h4 className="font-gaming text-xs font-bold text-yellow-400 mb-2 uppercase tracking-wider">
+            🌅 Утро
+          </h4>
           <div className="grid grid-cols-2 gap-2">
-            {base.map((t) => (
+            {morningTasks.map((t) => (
               <TaskButton
                 key={t.id}
                 task={normalizeTask(t, true)}
@@ -408,14 +395,279 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
                 onComplete={onTaskComplete}
                 disabled={disabled}
                 accentColor={accentColor}
-                variant="base"
+                variant="morning"
                 isDaily={true}
                 onUndo={handleUndo}
               />
             ))}
           </div>
-        </Block>
-      </div>
+        </div>
+
+        {/* Divider */}
+        {morningTasks.length > 0 && (dayTasks.length > 0 || eveningTasks.length > 0) && (
+          <hr className="border-t border-slate-600/30 my-2" />
+        )}
+
+        {/* ☀️ День Section */}
+        {dayTasks.length > 0 && (
+          <>
+            <div>
+              <h4 className="font-gaming text-xs font-bold text-amber-400 mb-2 uppercase tracking-wider mt-4">
+                ☀️ День
+              </h4>
+              <div className="grid grid-cols-2 gap-2">
+                {dayTasks.map((t) => (
+                  <TaskButton
+                    key={t.id}
+                    task={normalizeTask(t, true)}
+                    status={getStatus(t.id)}
+                    onComplete={onTaskComplete}
+                    disabled={disabled}
+                    accentColor={accentColor}
+                    variant="morning"
+                    isDaily={true}
+                    onUndo={handleUndo}
+                  />
+                ))}
+              </div>
+            </div>
+            {/* Divider */}
+            {eveningTasks.length > 0 && (
+              <hr className="border-t border-slate-600/30 my-2" />
+            )}
+          </>
+        )}
+
+        {/* 🌙 Вечер Section */}
+        {eveningTasks.length > 0 && (
+          <div>
+            <h4 className="font-gaming text-xs font-bold text-indigo-400 mb-2 uppercase tracking-wider mt-4">
+              🌙 Вечер
+            </h4>
+            <div className="grid grid-cols-2 gap-2">
+              {eveningTasks.map((t) => (
+                <TaskButton
+                  key={t.id}
+                  task={normalizeTask(t, true)}
+                  status={getStatus(t.id)}
+                  onComplete={onTaskComplete}
+                  disabled={disabled}
+                  accentColor={accentColor}
+                  variant="morning"
+                  isDaily={true}
+                  onUndo={handleUndo}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </TaskGroup>
+
+      {/* Block 2: ПИТАНИЕ — main meals row + bonus buttons */}
+      <TaskGroup
+        title="ПИТАНИЕ"
+        titleColor="text-yellow-400"
+        headerClass="bg-gradient-to-r from-amber-900/40 to-orange-900/40 border-b-2 border-amber-500/60"
+        bodyClass="pt-2 space-y-3"
+        className="bg-slate-800/70 border-amber-500/60"
+      >
+        {/* Meal Rows: Завтрак / Обед / Ужин */}
+        {nutritionMainMeals.map((row) => {
+          const main = normalizeTask(row.main, true)
+          return (
+            <div key={main.id} className="mb-3 space-y-2">
+              {/* Row 1: Main Meal Button (Full Width) */}
+              <TaskButton
+                task={main}
+                status={getStatus(main.id)}
+                onComplete={onTaskComplete}
+                disabled={disabled}
+                accentColor={accentColor}
+                variant="morning"
+                isDaily={true}
+                onUndo={handleUndo}
+                className="w-full"
+              />
+              {/* Row 2: Bonus tags container (below main meal) */}
+              {foodBonus.length > 0 && (
+                <div className="flex gap-2 justify-center">
+                  {foodBonus.map((bonus) => {
+                    const bonusTask = normalizeTask(bonus, true)
+                    return (
+                      <TaskButton
+                        key={`${bonusTask.id}-${main.id}`}
+                        task={bonusTask}
+                        status={getStatus(bonusTask.id)}
+                        onComplete={onTaskComplete}
+                        disabled={disabled}
+                        accentColor={accentColor}
+                        variant="base"
+                        isDaily={true}
+                        onUndo={handleUndo}
+                        size="small"
+                      />
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {/* Extra meal: Полдник */}
+        {nutritionSnack && (
+          <div className="pt-1">
+            <TaskButton
+              key={nutritionSnack.main.id}
+              task={normalizeTask(nutritionSnack.main, true)}
+              status={getStatus(nutritionSnack.main.id)}
+              onComplete={onTaskComplete}
+              disabled={disabled}
+              accentColor={accentColor}
+              variant="morning"
+              isDaily={true}
+              onUndo={handleUndo}
+              className="w-full"
+            />
+          </div>
+        )}
+      </TaskGroup>
+
+      {/* Block 3: ШКОЛА — routine grid + compact grades row */}
+      <TaskGroup
+        title="ШКОЛА"
+        titleColor="text-purple-400"
+        headerClass="bg-gradient-to-r from-purple-900/40 to-violet-900/40 border-b-2 border-purple-500/60"
+        bodyClass="pt-2 space-y-3"
+        className="bg-slate-800/70 border-purple-500/60"
+      >
+        {/* Routine: Ушел вовремя / Собрал портфель */}
+        {schoolRoutine.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            {schoolRoutine.map((t) => (
+              <TaskButton
+                key={t.id}
+                task={normalizeTask(t, true)}
+                status={getStatus(t.id)}
+                onComplete={onTaskComplete}
+                disabled={disabled}
+                accentColor={accentColor}
+                variant="school"
+                isDaily={true}
+                onUndo={handleUndo}
+              />
+            ))}
+          </div>
+        )}
+        
+        {/* Grades: Compact row */}
+        {grades.length > 0 && (
+          <div className="pt-1">
+            <h4 className="font-gaming text-xs font-bold text-purple-300 uppercase tracking-wider mb-2">
+              ОЦЕНКИ СЕГОДНЯ
+            </h4>
+            <div className="flex flex-wrap gap-1 justify-between">
+              {GRADE_ORDER.map((gradeId) => {
+                const t = grades.find((g) => g.id === gradeId)
+                if (!t) return null
+                const style = GRADE_STYLE[gradeId]
+                const task = normalizeTask(t, false)
+                const hasRipple = gradeRipples[task.id] !== undefined
+                const isGoldGrade = gradeId === 'grade_5_plus'
+                const isRedGrade = gradeId === 'grade_2'
+                
+                // Special glow classes for 5+ (gold) and 2 (red flash)
+                const specialGlowClass = hasRipple
+                  ? isGoldGrade
+                    ? 'shadow-[0_0_20px_rgba(251,191,36,0.8),0_0_30px_rgba(251,191,36,0.5)] ring-2 ring-amber-400/60'
+                    : isRedGrade
+                      ? 'shadow-[0_0_20px_rgba(239,68,68,0.8),0_0_30px_rgba(239,68,68,0.5)] ring-2 ring-red-500/60'
+                      : 'shadow-[0_0_15px_rgba(16,185,129,0.6)] ring-1 ring-green-400/40'
+                  : ''
+                
+                // Grades are intentionally always "pending" to keep them repeatable
+                return (
+                  <motion.div
+                    key={t.id}
+                    className="relative w-9 h-9 shrink-0"
+                    initial={false}
+                    animate={hasRipple ? { scale: [1, 1.1, 1] } : {}}
+                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                  >
+                    {/* Ripple effect overlay */}
+                    {hasRipple && (
+                      <motion.div
+                        className="absolute inset-0 rounded-lg pointer-events-none"
+                        initial={{ scale: 0, opacity: 0.8 }}
+                        animate={{ scale: 2.5, opacity: 0 }}
+                        transition={{ duration: 0.5, ease: 'easeOut' }}
+                        style={{
+                          background: isGoldGrade
+                            ? 'radial-gradient(circle, rgba(251,191,36,0.6) 0%, transparent 70%)'
+                            : isRedGrade
+                              ? 'radial-gradient(circle, rgba(239,68,68,0.6) 0%, transparent 70%)'
+                              : 'radial-gradient(circle, rgba(16,185,129,0.4) 0%, transparent 70%)',
+                        }}
+                      />
+                    )}
+                    <motion.button
+                      type="button"
+                      onClick={(e) => handleGradeClick(task, e)}
+                      disabled={disabled}
+                      className={cn(
+                        'relative w-full h-full rounded-lg flex flex-col items-center justify-center gap-0 p-1 transition touch-manipulation',
+                        style?.class,
+                        specialGlowClass,
+                        // CRITICAL: Disabled state must maintain 100% vibrancy - no opacity/grayscale
+                        disabled && 'opacity-100 cursor-default'
+                      )}
+                      whileTap={!disabled ? { scale: 0.95 } : undefined}
+                      aria-label={`${style?.labelRu} — ${style?.xp >= 0 ? '+' : ''}${style?.xp} XP (повторяемая)`}
+                    >
+                      <span
+                        className={cn(
+                          'font-gaming text-xs font-bold tabular-nums leading-none relative z-10',
+                          style?.textClass ?? 'font-black'
+                        )}
+                      >
+                        {style?.num ?? t.emoji}
+                      </span>
+                      <span className="font-mono text-[7px] tabular-nums leading-tight opacity-90 relative z-10">
+                        {style?.xp >= 0 ? `+${style?.xp}` : style?.xp}
+                      </span>
+                    </motion.button>
+                  </motion.div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </TaskGroup>
+
+      {/* Block 4: ПОМОЩЬ — Base support 2-column grid */}
+      <TaskGroup
+        title="ПОМОЩЬ"
+        titleColor="text-emerald-400"
+        headerClass="bg-gradient-to-r from-emerald-900/40 to-teal-900/40 border-b-2 border-emerald-500/60"
+        bodyClass="pt-2"
+        className="bg-slate-800/70 border-emerald-500/60"
+      >
+        <div className="grid grid-cols-2 gap-2">
+          {baseSupport.map((t) => (
+            <TaskButton
+              key={t.id}
+              task={normalizeTask(t, true)}
+              status={getStatus(t.id)}
+              onComplete={onTaskComplete}
+              disabled={disabled}
+              accentColor={accentColor}
+              variant="base"
+              isDaily={true}
+              onUndo={handleUndo}
+            />
+          ))}
+        </div>
+      </TaskGroup>
     </div>
   )
 }

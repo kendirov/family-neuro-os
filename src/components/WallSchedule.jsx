@@ -39,8 +39,8 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
   return (
     <div
       className={cn(
-        'rounded-xl border-2 overflow-hidden flex flex-col min-w-0',
-        isPurple ? 'border-purple-500/40 bg-slate-900/70' : 'border-cyan-500/40 bg-slate-900/70'
+        'rounded-xl border-2 overflow-hidden flex flex-col min-w-0 bg-slate-950',
+        isPurple ? 'border-purple-500/40' : 'border-cyan-500/40'
       )}
     >
       <h3
@@ -52,8 +52,8 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
       >
         {title}
       </h3>
-      <div className="px-2 pb-2 pt-1">
-        <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+      <div className="px-2 pb-2 pt-1 overflow-x-auto">
+        <div className="grid grid-cols-5 gap-1 sm:gap-1.5">
           {[1, 2, 3, 4, 5].map((dayNum, index) => {
             const lessons = scheduleByDay[dayNum] ?? []
             const isToday = currentDay === dayNum
@@ -64,12 +64,12 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
               >
                 <div
                   className={cn(
-                    'rounded-md px-1.5 py-1 font-mono text-[9px] sm:text-[10px] uppercase tracking-wider text-center border border-slate-600/60',
+                    'rounded-md px-2 py-1.5 font-mono text-sm font-bold uppercase tracking-wide text-center border border-slate-600/60',
                     isToday
                       ? isPurple
                         ? 'bg-purple-500/40 text-purple-50 border-purple-400/70'
                         : 'bg-cyan-500/40 text-cyan-50 border-cyan-400/70'
-                      : 'bg-slate-800/80 text-slate-300'
+                      : 'bg-slate-800/80 text-blue-400'
                   )}
                 >
                   {DAY_LABELS[index]}
@@ -78,13 +78,16 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
                   {lessons.map((lesson, i) => (
                     <div
                       key={`${dayNum}-${i}`}
-                      className="rounded-md bg-slate-800/80 border border-slate-700/60 px-1.5 py-0.5 font-mono text-[9px] sm:text-[10px] leading-tight text-slate-100 break-words"
+                      className={cn(
+                        'rounded-md border border-slate-700/60 px-2 py-1 font-mono text-xs leading-tight text-white break-words tracking-wide',
+                        i % 2 === 0 ? 'bg-slate-900/50' : 'bg-slate-950'
+                      )}
                     >
                       {lesson}
                     </div>
                   ))}
                   {lessons.length === 0 && (
-                    <div className="rounded-md bg-slate-900/60 border border-dashed border-slate-700/60 px-1.5 py-1 font-mono text-[9px] text-slate-500 text-center">
+                    <div className="rounded-md bg-slate-900/60 border border-dashed border-slate-700/60 px-2 py-1 font-mono text-xs text-slate-500 text-center">
                       —
                     </div>
                   )}
@@ -111,7 +114,7 @@ export function WallSchedule() {
 
   return (
     <section
-      className="wall-schedule shrink-0 w-full rounded-xl bg-slate-900 border border-slate-700/60 px-4 py-4"
+      className="wall-schedule shrink-0 w-full rounded-xl bg-slate-950 border border-slate-700/60 px-4 py-4 overflow-x-auto"
       aria-label="Расписание на неделю"
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-6xl mx-auto">
