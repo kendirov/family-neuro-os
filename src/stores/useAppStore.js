@@ -510,6 +510,7 @@ export const useAppStore = create((set, get) => ({
     const state = get()
     const user = state.users.find((u) => u.id === pilotId)
     const balanceAtStart = user ? Math.max(0, user.balance) : 0
+    const previousSecondsToday = state.pilots?.[pilotId]?.secondsToday ?? 0
     const now = new Date().toISOString()
     const m = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
     // Map mode to timer_mode: 'game' or 'cartoon' (youtube/good are cartoons)
@@ -543,7 +544,8 @@ export const useAppStore = create((set, get) => ({
             sessionTotalBurned: 0,
             timerStatus: 'running',
             timerStartAt: now,
-            secondsToday: 0, // Will be loaded from DB on next sync
+            // Preserve any accumulated seconds so UI never flashes to 0.
+            secondsToday: previousSecondsToday,
           },
         },
       }))
@@ -564,29 +566,33 @@ export const useAppStore = create((set, get) => ({
     const pilot = state.pilots?.[pilotId]
     if (!pilot || pilot.status !== 'RUNNING') return
     
-    // CRITICAL: Calculate elapsed from server state, then update DB
+    // STEP 1: локально считаем дельту и немедленно обновляем стор (оптимистично)
+    const now = Date.now()
+    let elapsedSeconds = 0
+    if (pilot.timerStartAt) {
+      const startMs = new Date(pilot.timerStartAt).getTime()
+      elapsedSeconds = Math.max(0, Math.floor((now - startMs) / 1000))
+    }
+    const baseSeconds = pilot.secondsToday ?? 0
+    const newSecondsToday = baseSeconds + elapsedSeconds
+
+    set((s) => ({
+      pilots: {
+        ...s.pilots,
+        [pilotId]: {
+          ...s.pilots[pilotId],
+          status: 'PAUSED',
+          burnerActive: false,
+          timerStatus: 'paused',
+          timerStartAt: null,
+          secondsToday: newSecondsToday,
+        },
+      },
+    }))
+
+    // STEP 2: асинхронно синхронизируемся с Supabase
     ;(async () => {
       try {
-        // Get current timer state from DB (source of truth)
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('seconds_today, timer_start_at')
-          .eq('id', pilotId)
-          .single()
-        
-        const currentSecondsToday = Number(profile?.seconds_today ?? 0)
-        let elapsedSeconds = 0
-        
-        // Calculate elapsed: NOW() - timer_start_at
-        if (profile?.timer_start_at) {
-          const now = new Date()
-          const timerStartAt = new Date(profile.timer_start_at)
-          elapsedSeconds = Math.floor((now.getTime() - timerStartAt.getTime()) / 1000)
-        }
-        
-        const newSecondsToday = currentSecondsToday + elapsedSeconds
-        
-        // Update DB: status='paused', seconds_today += elapsed, timer_start_at=null
         await supabase
           .from('profiles')
           .update({
@@ -595,21 +601,6 @@ export const useAppStore = create((set, get) => ({
             timer_start_at: null,
           })
           .eq('id', pilotId)
-        
-        // Update local state after DB update
-        set((state) => ({
-          pilots: {
-            ...state.pilots,
-            [pilotId]: { 
-              ...state.pilots[pilotId], 
-              status: 'PAUSED', 
-              burnerActive: false,
-              timerStatus: 'paused',
-              timerStartAt: null,
-              secondsToday: newSecondsToday,
-            },
-          },
-        }))
       } catch (e) {
         console.error('pauseTimer sync:', e)
       }
@@ -631,7 +622,8 @@ export const useAppStore = create((set, get) => ({
     // CRITICAL: Update DB first
     ;(async () => {
       try {
-        // Get timer_mode from DB to preserve it
+        // Get timer_mode + seconds_today from DB, но секунды берём максимумом:
+        // локальное (store) значение важнее, если оно больше (мы уже могли посчитать паузу).
         const { data: profile } = await supabase
           .from('profiles')
           .select('timer_mode, seconds_today')
@@ -639,15 +631,18 @@ export const useAppStore = create((set, get) => ({
           .single()
         
         const timerMode = profile?.timer_mode ?? 'game'
-        const secondsToday = Number(profile?.seconds_today ?? 0)
+        const dbSecondsToday = Number(profile?.seconds_today ?? 0)
+        const localSecondsToday = pilot.secondsToday ?? 0
+        const secondsToday = Math.max(localSecondsToday, dbSecondsToday)
         
-        // Update DB: status='running', timer_start_at=NOW()
+        // Update DB: status='running', timer_start_at=NOW(), seconds_today = max(local, db)
         await supabase
           .from('profiles')
           .update({
             timer_status: 'running',
             timer_start_at: now,
             timer_mode: timerMode,
+            seconds_today: secondsToday,
           })
           .eq('id', pilotId)
         
@@ -1213,6 +1208,84 @@ export const useAppStore = create((set, get) => ({
         },
       }
     })
+  },
+
+  /**
+   * Supabase Realtime: subscribe to profiles updates for instant timer sync.
+   * Listens for UPDATEs on public.profiles and immediately syncs:
+   * - users list (balance, name, color)
+   * - pilots' timer fields (timer_status, timer_start_at, seconds_today, timer_mode)
+   *
+   * IMPORTANT: protects against race conditions by ignoring "older" payloads
+   * where seconds_today is lower than our local paused secondsToday.
+   *
+   * Returns an unsubscribe function that removes the channel.
+   */
+  subscribeToRealtime: () => {
+    const syncTimerStateFromProfile = get().syncTimerStateFromProfile
+
+    const channel = supabase
+      .channel('public:profiles')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+        },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
+
+          const pilotId = row.id
+          if (!PILOT_IDS.includes(pilotId)) {
+            return
+          }
+
+           // Защита от гонок: если локально уже пауза с бОльшим временем,
+           // не даём более старому состоянию из БД затереть store.
+           const incomingSeconds = Number(row.seconds_today ?? 0)
+           const localState = get()
+           const localPilot = localState.pilots?.[pilotId]
+           const localSeconds = localPilot?.secondsToday ?? 0
+
+           if (
+             localPilot &&
+             localPilot.timerStatus === 'paused' &&
+             incomingSeconds < localSeconds
+           ) {
+             // Игнорируем устаревшее событие
+             return
+           }
+
+          // Update users collection (balance, name, color) from latest profile row
+          set((state) => {
+            const updatedUser = profileToUser(row)
+            const current = state.users ?? []
+            const exists = current.some((u) => u.id === updatedUser.id)
+            return {
+              users: exists
+                ? current.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+                : [...current, updatedUser],
+            }
+          })
+
+          // CRITICAL: sync pilot timer state immediately from DB
+          syncTimerStateFromProfile(row)
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] Subscribed to public.profiles updates')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[Realtime] Supabase realtime channel error for public.profiles')
+        }
+      })
+
+    // Expose cleanup to callers (Dashboard/App)
+    return () => {
+      supabase.removeChannel(channel)
+    }
   },
 
   /**

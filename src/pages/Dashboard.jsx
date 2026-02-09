@@ -938,6 +938,16 @@ export function Dashboard({ mode = 'pilot' }) {
   const lastOfflineSyncToast = useAppStore((s) => s.lastOfflineSyncToast)
   const clearLastOfflineSyncToast = useAppStore((s) => s.clearLastOfflineSyncToast)
 
+  // Supabase Realtime: subscribe once per dashboard mount for multi-device timer sync
+  useEffect(() => {
+    const unsubscribe = useAppStore.getState().subscribeToRealtime?.()
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (lastOfflineSyncToast) {
       setToast({ message: lastOfflineSyncToast.message, variant: 'default' })

@@ -77,12 +77,25 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
   // This "ticker" forces re-renders to update the calculated time display (NOW - start_at)
   // It does NOT change data, only updates the visual text "14:01", "14:02"...
   useEffect(() => {
-    // Immediately update display when state changes
+    // Если пилот отсутствует — показываем 0
+    if (!pilot) {
+      setDisplayElapsedSeconds(0)
+      return
+    }
+
+    // При паузе жёстко привязываемся к накопленным секундам в сторе,
+    // чтобы никакие сетевые лаги не сбивали отображение.
+    if (pilot.timerStatus === 'paused') {
+      setDisplayElapsedSeconds(pilot.secondsToday ?? 0)
+      return
+    }
+
+    // Для idle/running пересчитываем через helper
     const currentElapsed = calculateElapsedSeconds(pilot)
     setDisplayElapsedSeconds(currentElapsed)
     
-    // Only run interval when timer is actively running
-    if (!pilot || pilot.timerStatus !== 'running') {
+    // Интервал нужен только в состоянии running
+    if (pilot.timerStatus !== 'running') {
       return
     }
     
@@ -95,7 +108,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
         setDisplayElapsedSeconds(elapsed)
       }
     }, 1000)
-    
+
     return () => clearInterval(interval)
   }, [pilot?.timerStatus, pilot?.timerStartAt, pilot?.secondsToday, id])
   
@@ -207,8 +220,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
         'relative rounded-2xl border-[3px] bg-slate-800/95 p-6 overflow-hidden transition-all duration-300 flex flex-col',
         isRunning && glowClass,
         isRunning && bgGlow,
-        !isRunning && 'border-slate-600/70',
-        isPaused && 'opacity-80'
+        !isRunning && 'border-slate-600/70'
       )}
     >
       {isPaused && (
@@ -375,14 +387,17 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
           disabled={(isIdle && !canStart) || isStarting}
           className={cn(
             'relative w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 transition-all touch-manipulation flex items-center justify-center shadow-2xl',
-            isIdle && !canStart && 'opacity-50 cursor-not-allowed border-slate-600 bg-slate-700/50',
-            isIdle && canStart && !isStarting && 'bg-gradient-to-br from-emerald-500 to-blue-500 border-emerald-400/80 hover:scale-105 active:scale-95 animate-pulse',
-            isIdle && canStart && isStarting && 'bg-gradient-to-br from-slate-500 to-slate-600 border-slate-400/80 cursor-wait',
+            isIdle && !canStart && 'cursor-not-allowed border-slate-600 bg-slate-700/80',
+            // Старт / Продолжить — всегда яркая, сочная кнопка
+            (isIdle && canStart) && 'bg-gradient-to-br from-emerald-500 to-blue-500 border-emerald-400/80 hover:scale-105 active:scale-95 animate-pulse',
             isRunning && 'bg-gradient-to-br from-amber-500 to-yellow-500 border-amber-400/80 hover:scale-105 active:scale-95',
-            isPaused && 'bg-gradient-to-br from-emerald-500 to-blue-500 border-emerald-400/80 hover:scale-105 active:scale-95'
+            isPaused && 'bg-gradient-to-br from-emerald-500 to-blue-500 border-emerald-400/80 hover:scale-105 active:scale-95',
+            // Во время сетевых операций просто блокируем клики, но НЕ тускним
+            isStarting && 'pointer-events-none'
           )}
           whileHover={(isIdle && canStart && !isStarting) || !isIdle ? { scale: 1.05 } : undefined}
           whileTap={(isIdle && canStart && !isStarting) || !isIdle ? { scale: 0.95 } : undefined}
+          aria-label={isIdle ? 'Старт' : isRunning ? 'Пауза' : 'Продолжить'}
         >
           {isStarting ? (
             <Loader2 className="w-10 h-10 text-white animate-spin" strokeWidth={3} />
@@ -391,6 +406,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
           ) : isRunning ? (
             <Pause className="w-10 h-10 sm:w-12 sm:h-12 text-white" strokeWidth={3} fill="currentColor" />
           ) : (
+            // Paused state: show Play icon, label says "Продолжить"
             <Play className="w-10 h-10 sm:w-12 sm:h-12 text-white ml-1" strokeWidth={3} fill="currentColor" />
           )}
         </motion.button>
