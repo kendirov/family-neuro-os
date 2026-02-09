@@ -388,6 +388,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
           }}
           onTaskComplete={handleMissionTaskComplete}
           disabled={effectiveLocked}
+          isGodMode={isCommander}
         />
       </div>
 

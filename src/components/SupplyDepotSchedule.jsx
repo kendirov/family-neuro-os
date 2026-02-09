@@ -30,18 +30,25 @@ function TaskButton({
   isDaily = false,
   onUndo,
   size = 'default', // 'default' | 'small'
+  isGodMode = false, // only commanders/admins can undo
 }) {
   const completed = status === 'completed'
   const pending = status === 'pending'
   const isPenalty = task.credits < 0
   const handleClick = (e) => {
+    // Main action is disabled for completed tasks or when column is locked/read-only
     if (completed || disabled) return
     onComplete(task, e)
   }
-  const handleUndo = (e) => {
+  const handleUndoClick = (e) => {
     e.stopPropagation()
-    if (!completed || !onUndo || disabled) return
-    onUndo(task)
+    // Do not allow undo when:
+    // - task is not completed
+    // - there is no handler
+    // - column is in read-only/locked mode
+    // - user is not in god/admin mode
+    if (!completed || !onUndo || disabled || !isGodMode) return
+    onUndo(task, e)
   }
 
   // Default state: dark background, thin border
@@ -88,7 +95,9 @@ function TaskButton({
     <motion.button
       type="button"
       onClick={handleClick}
-      disabled={completed || disabled}
+      // IMPORTANT: do NOT disable button just because it's completed,
+      // otherwise nested Undo button will never receive click events.
+      disabled={disabled}
       className={cn(
         'relative border-2 flex items-center justify-center gap-1.5 font-sans font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal text-center leading-tight break-words',
         sizeClass,
@@ -113,11 +122,11 @@ function TaskButton({
       aria-label={completed ? `${task.label} — выполнено` : `${task.label} — ${task.credits >= 0 ? '+' : ''}${task.credits} XP`}
     >
       {/* Undo icon: ONLY show if user has edit permissions (not disabled/read-only) */}
-      {completed && isDaily && onUndo && !disabled && (
+      {completed && isDaily && onUndo && !disabled && isGodMode && (
         <button
           type="button"
-          onClick={handleUndo}
-          className="absolute top-1 right-1 z-20 w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/90 text-white hover:bg-red-500 border border-red-400/80 shadow-md touch-manipulation transition hover:scale-110 active:scale-95"
+          onClick={handleUndoClick}
+          className="absolute top-1 right-1 z-20 w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/90 text-white hover:bg-red-500 border border-red-400/80 shadow-md touch-manipulation transition hover:scale-110 active:scale-95 pointer-events-auto cursor-pointer"
           aria-label="Отменить действие"
           title="Отменить"
         >
@@ -165,7 +174,7 @@ function TaskButton({
 }
 
 /** Food row: main + optional modifiers (compact). One cohesive unit with tight spacing. */
-function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, onUndo }) {
+function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, onUndo, isGodMode = false }) {
   const mainTask = normalizeTask(main, true)
   const modTasks = modifiers.map((m) => normalizeTask(m, true))
   const mainCompleted = getStatus(main.id) === 'completed'
@@ -175,7 +184,9 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
       <motion.button
         type="button"
         onClick={(e) => !mainCompleted && !disabled && onTaskComplete(mainTask, e)}
-        disabled={mainCompleted || disabled}
+        // keep column-level disabled, but do NOT disable just because completed,
+        // so that nested Undo button can still be clicked in commander view
+        disabled={disabled}
         className={cn(
           'relative w-full h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-1.5 font-sans text-[9px] font-semibold capitalize tracking-wide transition touch-manipulation whitespace-normal leading-tight break-words',
           modTasks.length > 0 ? 'rounded-t-lg' : 'rounded-lg',
@@ -186,7 +197,7 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
         whileTap={!mainCompleted && !disabled ? { scale: 0.98 } : undefined}
       >
         {/* Undo icon: ONLY show if user has edit permissions (not disabled/read-only) */}
-        {mainCompleted && onUndo && !disabled && (
+        {mainCompleted && onUndo && !disabled && isGodMode && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onUndo(mainTask) }}
@@ -229,7 +240,8 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
                 key={mod.id}
                 type="button"
                 onClick={(e) => !modCompleted && !disabled && onTaskComplete(mod, e)}
-                disabled={modCompleted || disabled}
+                // do not fully disable when completed to allow nested Undo button
+                disabled={disabled}
                 className={cn(
                   'relative flex-1 h-auto min-h-[32px] px-1 py-2 flex items-center justify-center gap-0.5 font-sans text-[9px] font-semibold tabular-nums transition touch-manipulation border-r border-orange-600/20 last:border-r-0 whitespace-normal leading-tight break-words rounded',
                   modCompleted
@@ -239,7 +251,7 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
                 whileTap={!modCompleted && !disabled ? { scale: 0.98 } : undefined}
               >
                 {/* Undo icon: ONLY show if user has edit permissions (not disabled/read-only) */}
-                {modCompleted && onUndo && !disabled && (
+                {modCompleted && onUndo && !disabled && isGodMode && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onUndo(mod) }}
@@ -305,8 +317,9 @@ const GRADE_ORDER = ['grade_5_plus', 'grade_5', 'grade_4', 'grade_3', 'grade_2']
 /**
  * Chronological Supply Depot: 5 control blocks (Daily Routine, Nutrition, School, Base Support, Penalty Box-style handled in parent).
  * Compact buttons; same getStatus/onTaskComplete contract as MissionLog.
+ * isGodMode: true only for commander/admin views (allows undo).
  */
-export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accentColor, userId, onUndoDailyTask }) {
+export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accentColor, userId, onUndoDailyTask, isGodMode = false }) {
   const morning = TASK_CONFIG.MORNING_ROUTINE.tasks || []
   const school = TASK_CONFIG.SCHOOL_INTELLECT.tasks || []
   const grades = school.filter((t) => t.id.startsWith('grade_'))
@@ -398,6 +411,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
                 variant="morning"
                 isDaily={true}
                 onUndo={handleUndo}
+                isGodMode={isGodMode}
               />
             ))}
           </div>
@@ -427,6 +441,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
                     variant="morning"
                     isDaily={true}
                     onUndo={handleUndo}
+                    isGodMode={isGodMode}
                   />
                 ))}
               </div>
@@ -456,6 +471,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
                   variant="morning"
                   isDaily={true}
                   onUndo={handleUndo}
+                  isGodMode={isGodMode}
                 />
               ))}
             </div>
@@ -477,16 +493,14 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
           return (
             <div key={main.id} className="mb-3 space-y-2">
               {/* Row 1: Main Meal Button (Full Width) */}
-              <TaskButton
-                task={main}
-                status={getStatus(main.id)}
-                onComplete={onTaskComplete}
+              <FoodRow
+                main={row.main}
+                modifiers={row.modifiers ?? []}
+                getStatus={getStatus}
+                onTaskComplete={onTaskComplete}
                 disabled={disabled}
-                accentColor={accentColor}
-                variant="morning"
-                isDaily={true}
                 onUndo={handleUndo}
-                className="w-full"
+                isGodMode={isGodMode}
               />
               {/* Row 2: Bonus tags container (below main meal) */}
               {foodBonus.length > 0 && (
@@ -504,6 +518,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
                         variant="base"
                         isDaily={true}
                         onUndo={handleUndo}
+                        isGodMode={isGodMode}
                         size="small"
                       />
                     )
@@ -527,6 +542,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
               variant="morning"
               isDaily={true}
               onUndo={handleUndo}
+              isGodMode={isGodMode}
               className="w-full"
             />
           </div>
@@ -555,6 +571,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
                 variant="school"
                 isDaily={true}
                 onUndo={handleUndo}
+                isGodMode={isGodMode}
               />
             ))}
           </div>
@@ -664,6 +681,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
               variant="base"
               isDaily={true}
               onUndo={handleUndo}
+              isGodMode={isGodMode}
             />
           ))}
         </div>
