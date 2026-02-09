@@ -35,8 +35,6 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
   const headerBg = isPurple ? 'bg-purple-600/30' : 'bg-cyan-600/30'
   const headerBorder = isPurple ? 'border-purple-500/50' : 'border-cyan-500/50'
   const headerText = isPurple ? 'text-purple-200' : 'text-cyan-200'
-  const cellBg = 'bg-slate-800/80'
-  const cellBorder = 'border-slate-600/60'
 
   return (
     <div
@@ -54,57 +52,47 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
       >
         {title}
       </h3>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse" role="grid">
-          <thead>
-            <tr>
-              {DAY_LABELS.map((label, i) => {
-                const dayNum = i + 1
-                const isToday = currentDay === dayNum
-                return (
-                  <th
-                    key={dayNum}
-                    className={cn(
-                      'font-mono font-bold text-[10px] uppercase tracking-wider py-1.5 px-1 border-b border-r border-slate-600/60 last:border-r-0',
-                      isToday
-                        ? isPurple
-                          ? 'bg-purple-500/40 text-purple-100 border-purple-400/60'
-                          : 'bg-cyan-500/40 text-cyan-100 border-cyan-400/60'
-                        : isPurple
-                          ? 'bg-slate-800/80 text-slate-400'
-                          : 'bg-slate-800/80 text-slate-400'
-                    )}
-                  >
-                    {label}
-                  </th>
-                )
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: MAX_ROWS }).map((_, rowIndex) => (
-              <tr key={rowIndex}>
-                {[1, 2, 3, 4, 5].map((dayNum) => {
-                  const lessons = scheduleByDay[dayNum] ?? []
-                  const lesson = lessons[rowIndex] ?? ''
-                  const isToday = currentDay === dayNum
-                  return (
-                    <td
-                      key={dayNum}
-                      className={cn(
-                        'py-0.5 px-1 border-b border-r border-slate-600/50 last:border-r-0 font-mono text-[9px] text-slate-300 align-top',
-                        cellBg,
-                        isToday && (isPurple ? 'bg-purple-500/10' : 'bg-cyan-500/10')
-                      )}
+      <div className="px-2 pb-2 pt-1">
+        <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+          {[1, 2, 3, 4, 5].map((dayNum, index) => {
+            const lessons = scheduleByDay[dayNum] ?? []
+            const isToday = currentDay === dayNum
+            return (
+              <div
+                key={dayNum}
+                className="flex flex-col gap-1 min-w-0"
+              >
+                <div
+                  className={cn(
+                    'rounded-md px-1.5 py-1 font-mono text-[9px] sm:text-[10px] uppercase tracking-wider text-center border border-slate-600/60',
+                    isToday
+                      ? isPurple
+                        ? 'bg-purple-500/40 text-purple-50 border-purple-400/70'
+                        : 'bg-cyan-500/40 text-cyan-50 border-cyan-400/70'
+                      : 'bg-slate-800/80 text-slate-300'
+                  )}
+                >
+                  {DAY_LABELS[index]}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {lessons.map((lesson, i) => (
+                    <div
+                      key={`${dayNum}-${i}`}
+                      className="rounded-md bg-slate-800/80 border border-slate-700/60 px-1.5 py-0.5 font-mono text-[9px] sm:text-[10px] leading-tight text-slate-100 break-words"
                     >
                       {lesson}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    </div>
+                  ))}
+                  {lessons.length === 0 && (
+                    <div className="rounded-md bg-slate-900/60 border border-dashed border-slate-700/60 px-1.5 py-1 font-mono text-[9px] text-slate-500 text-center">
+                      —
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

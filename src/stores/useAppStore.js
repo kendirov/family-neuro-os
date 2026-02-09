@@ -14,7 +14,8 @@ function isWeekday() {
   return d >= 1 && d <= 5
 }
 
-const PILOT_IDS = ['roma', 'kirill']
+// CRITICAL: Order must be Kirill first, Roma second (for consistent left/right layout)
+const PILOT_IDS = ['kirill', 'roma']
 
 const initialPilotState = () => ({
   status: 'IDLE',
@@ -59,11 +60,37 @@ function dbTxToStore(row) {
 const RAID_TARGET = 1500
 const RAID_STORAGE_KEY = 'family_raidProgress'
 
+/**
+ * Calculate burn rate based on mode and accumulated time today.
+ * MODE A: CARTOONS (Media - youtube/good)
+ *   - Tier 1 (0-20 mins): 0 XP/min (FREE)
+ *   - Tier 2 (21-60 mins): 0.5 XP/min (Cheap)
+ *   - Tier 3 (60+ mins): 2 XP/min (Penalty)
+ * MODE B: GAMES
+ *   - Tier 1 (0-60 mins): 1 XP/min (Standard)
+ *   - Tier 2 (60+ mins): 2 XP/min (Overheat)
+ */
+function calculateBurnRate(mode, todayGameTime, todayMediaTime) {
+  if (mode === 'good' || mode === 'youtube') {
+    // Media mode
+    if (todayMediaTime < 20) return 0
+    if (todayMediaTime < 60) return 0.5
+    return 2
+  } else {
+    // Game mode
+    if (todayGameTime < 60) return 1
+    return 2
+  }
+}
+
 export const useAppStore = create((set, get) => ({
   users: [],
   transactions: [],
   purchases: [],
   isLoading: true,
+
+  /** Per-user today time tracking: { [userId]: { game: number, media: number } } */
+  todayTimeTracking: {},
 
   /** Shared raid goal: progress 0..RAID_TARGET. Auto-contributed when pilots earn XP. */
   raidProgress: 0,
@@ -127,11 +154,27 @@ export const useAppStore = create((set, get) => ({
     const today = getDateKey()
     const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('family_lastActiveDate') : null
     if (stored !== today) {
-      set({ dailyBase: {}, lastActiveDate: today })
+      // New day: reset daily tracking
+      set({ dailyBase: {}, lastActiveDate: today, todayTimeTracking: {} })
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('family_lastActiveDate', today)
         localStorage.removeItem('family_dailyBase')
       }
+      // Reset time tracking in database for all pilots
+      ;(async () => {
+        try {
+          await Promise.all(
+            PILOT_IDS.map((id) =>
+              supabase
+                .from('profiles')
+                .update({ today_game_time: 0, today_media_time: 0 })
+                .eq('id', id)
+            )
+          )
+        } catch (e) {
+          console.warn('checkDailyReset: failed to reset time tracking in DB', e)
+        }
+      })()
     } else {
       set({ lastActiveDate: today })
       if (typeof localStorage !== 'undefined') {
@@ -166,10 +209,52 @@ export const useAppStore = create((set, get) => ({
 
   gamingToday: { dateKey: '', minutes: 0 },
   dailyGamingMinutes: {},
-  /** По дням и режимам: { [dateKey]: { game: { roma, kirill }, youtube: { roma, kirill } } } */
+  /**
+   * По дням и режимам:
+   * { [dateKey]: { game: { roma, kirill }, youtube: { roma, kirill }, good: { roma, kirill } } }
+   * good = «полезные мультики».
+   */
   dailyGamingBreakdown: {},
   totalFlightTimeMinutes: 0,
-  addGamingMinutesToday: (minutes, mode = 'game', pilotIds = []) =>
+  /** Get today's game time for a specific user. */
+  getTodayGameTime: (userId) => {
+    const state = get()
+    const today = getDateKey()
+    // Check if we need to reset (new day)
+    const lastActive = state.lastActiveDate
+    if (lastActive !== today) return 0
+    return state.todayTimeTracking?.[userId]?.game ?? 0
+  },
+
+  /** Get today's media time for a specific user. */
+  getTodayMediaTime: (userId) => {
+    const state = get()
+    const today = getDateKey()
+    // Check if we need to reset (new day)
+    const lastActive = state.lastActiveDate
+    if (lastActive !== today) return 0
+    return state.todayTimeTracking?.[userId]?.media ?? 0
+  },
+
+  /** Increment today's time tracking for a user. */
+  incrementTodayTime: (userId, minutes, mode) => {
+    set((state) => {
+      const today = getDateKey()
+      const isMedia = mode === 'youtube' || mode === 'good'
+      const current = state.todayTimeTracking?.[userId] ?? { game: 0, media: 0 }
+      return {
+        todayTimeTracking: {
+          ...(state.todayTimeTracking ?? {}),
+          [userId]: {
+            game: isMedia ? current.game : current.game + minutes,
+            media: isMedia ? current.media + minutes : current.media,
+          },
+        },
+      }
+    })
+  },
+
+  addGamingMinutesToday: (minutes, mode = 'game', pilotIds = []) => {
     set((state) => {
       const today = getDateKey()
       const prev = state.gamingToday?.dateKey === today ? state.gamingToday.minutes : 0
@@ -178,14 +263,19 @@ export const useAppStore = create((set, get) => ({
       const prevBreakdown = state.dailyGamingBreakdown?.[today] ?? {
         game: { roma: 0, kirill: 0 },
         youtube: { roma: 0, kirill: 0 },
+        good: { roma: 0, kirill: 0 },
       }
-      const nextBreakdown = { ...prevBreakdown }
-      nextBreakdown.game = { ...prevBreakdown.game }
-      nextBreakdown.youtube = { ...prevBreakdown.youtube }
-      const modeKey = mode === 'youtube' ? 'youtube' : 'game'
+      const nextBreakdown = {
+        game: { ...(prevBreakdown.game ?? {}) },
+        youtube: { ...(prevBreakdown.youtube ?? {}) },
+        good: { ...(prevBreakdown.good ?? {}) },
+      }
+      const modeKey = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
       pilotIds.forEach((id) => {
         if (id === 'roma' || id === 'kirill') {
           nextBreakdown[modeKey][id] = (nextBreakdown[modeKey][id] ?? 0) + minutes
+          // Increment per-user time tracking
+          get().incrementTodayTime(id, minutes, mode)
         }
       })
       return {
@@ -194,7 +284,29 @@ export const useAppStore = create((set, get) => ({
         dailyGamingBreakdown: { ...(state.dailyGamingBreakdown ?? {}), [today]: nextBreakdown },
         totalFlightTimeMinutes: totalFlight,
       }
-    }),
+    })
+
+    // Best-effort: sync aggregated game/media minutes to settings table for analytics/limits.
+    ;(async () => {
+      try {
+        const state = get()
+        const { game, youtube } = state.getDisplayBreakdownToday()
+        const games_time_today = (game?.roma ?? 0) + (game?.kirill ?? 0)
+        const media_time_today = (youtube?.roma ?? 0) + (youtube?.kirill ?? 0)
+        await supabase
+          .from('settings')
+          .upsert(
+            [
+              { key: 'games_time_today', value: games_time_today },
+              { key: 'media_time_today', value: media_time_today },
+            ],
+            { onConflict: 'key' }
+          )
+      } catch (e) {
+        console.warn('addGamingMinutesToday settings sync (optional):', e)
+      }
+    })()
+  },
   getGamingMinutesToday: () => {
     const today = getDateKey()
     const state = get()
@@ -221,8 +333,9 @@ export const useAppStore = create((set, get) => ({
 
   /** Create one transaction row for the session; store its id in pilot.activeSessionId. */
   createSessionTransaction: (pilotId, mode = 'game') => {
-    const isYoutube = mode === 'youtube'
-    const desc = isYoutube ? '📺 Сессия (Start)' : '🎮 Игровая сессия (Start)'
+    let desc = '🎮 Игровая сессия (Start)'
+    if (mode === 'youtube') desc = '📺 Сессия (Start)'
+    else if (mode === 'good') desc = '🍏 Полезная сессия (Start)'
     const tempId = `session-${Date.now()}-${pilotId}`
     const entry = {
       id: tempId,
@@ -285,8 +398,9 @@ export const useAppStore = create((set, get) => ({
     const txId = pilot?.activeSessionId
     if (!txId) return // No active session row — do not create one here; createSessionTransaction handles that
     const newTotal = (pilot.sessionTotalBurned ?? 0) + rate
-    const isYoutube = mode === 'youtube'
-    const desc = isYoutube ? `📺 Сессия (${durationMinutes} мин)` : `🎮 Игровая сессия (${durationMinutes} мин)`
+    let desc = `🎮 Игровая сессия (${durationMinutes} мин)`
+    if (mode === 'youtube') desc = `📺 Сессия (${durationMinutes} мин)`
+    else if (mode === 'good') desc = `🍏 Полезная сессия (${durationMinutes} мин)`
     set((s) => {
       const u = s.users.find((x) => x.id === pilotId)
       const newBalance = u ? Math.max(0, (u.balance ?? 0) - rate) : 0
@@ -307,13 +421,20 @@ export const useAppStore = create((set, get) => ({
     get().addGamingMinutesToday(1, mode, [pilotId])
     ;(async () => {
       try {
+        // Get updated time tracking after increment
+        const updatedState = get()
+        const timeTracking = updatedState.todayTimeTracking?.[pilotId] ?? { game: 0, media: 0 }
         await supabase
           .from('transactions')
           .update({ amount: -newTotal, description: desc })
           .eq('id', txId)
         await supabase
           .from('profiles')
-          .update({ balance: Math.max(0, (user?.balance ?? 0) - rate) })
+          .update({
+            balance: Math.max(0, (user?.balance ?? 0) - rate),
+            today_game_time: timeTracking.game,
+            today_media_time: timeTracking.media,
+          })
           .eq('id', pilotId)
       } catch (e) {
         console.error('updateSessionBurn sync:', e)
@@ -328,8 +449,9 @@ export const useAppStore = create((set, get) => ({
     const txId = pilot?.activeSessionId
     const sessionMinutes = pilot?.sessionMinutes ?? 0
     const mode = pilot?.mode ?? 'game'
-    const isYoutube = mode === 'youtube'
-    const desc = isYoutube ? `📺 Сессия (${sessionMinutes} мин)` : `🎮 Игровая сессия (${sessionMinutes} мин)`
+    let desc = `🎮 Игровая сессия (${sessionMinutes} мин)`
+    if (mode === 'youtube') desc = `📺 Сессия (${sessionMinutes} мин)`
+    else if (mode === 'good') desc = `🍏 Полезная сессия (${sessionMinutes} мин)`
     if (txId) {
       set((s) => {
         const txList = (s.transactions ?? []).map((t) =>
@@ -362,7 +484,7 @@ export const useAppStore = create((set, get) => ({
     const user = state.users.find((u) => u.id === pilotId)
     const balanceAtStart = user ? Math.max(0, user.balance) : 0
     const now = new Date().toISOString()
-    const m = mode === 'youtube' ? 'youtube' : 'game'
+    const m = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
     set((s) => ({
       pilots: {
         ...s.pilots,
@@ -436,7 +558,7 @@ export const useAppStore = create((set, get) => ({
       const romaBalance = state.users.find((u) => u.id === 'roma')?.balance ?? 0
       const kirillBalance = state.users.find((u) => u.id === 'kirill')?.balance ?? 0
       const now = new Date().toISOString()
-      const m = mode === 'youtube' ? 'youtube' : 'game'
+      const m = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
       set((s) => ({
         pilots: {
           ...s.pilots,
@@ -515,26 +637,45 @@ export const useAppStore = create((set, get) => ({
     return base + roma + kirill
   },
 
-  /** Разбивка за сегодня: игра + мультики по каждому пилоту, с учётом текущих сессий. */
+  /** Разбивка за сегодня: игра + мультики (обычные + полезные) по каждому пилоту, с учётом текущих сессий. */
   getDisplayBreakdownToday: () => {
     const state = get()
     const today = getDateKey()
     const saved = state.dailyGamingBreakdown?.[today] ?? {
       game: { roma: 0, kirill: 0 },
       youtube: { roma: 0, kirill: 0 },
+      good: { roma: 0, kirill: 0 },
     }
-    const game = { ...saved.game }
-    const youtube = { ...saved.youtube }
+    const game = { ...(saved.game ?? {}) }
+    const youtube = { ...(saved.youtube ?? {}) }
+    const good = { ...(saved.good ?? {}) }
+
+    // Полезные мультики считаем как часть «мультики» для суммарной статистики.
+    ;['roma', 'kirill'].forEach((id) => {
+      youtube[id] = (youtube[id] ?? 0) + (good[id] ?? 0)
+    })
     PILOT_IDS.forEach((id) => {
       const p = state.pilots?.[id]
       if (!p || p.status === 'IDLE' || !p.mode) return
       const cur = p.sessionMinutes ?? 0
       if (cur <= 0) return
-      const key = p.mode === 'youtube' ? 'youtube' : 'game'
+      const key = p.mode === 'youtube' || p.mode === 'good' ? 'youtube' : 'game'
       if (key === 'game') game[id] = (game[id] ?? 0) + cur
       else youtube[id] = (youtube[id] ?? 0) + cur
     })
     return { game, youtube }
+  },
+
+  /** Сколько минут игр за сегодня (оба пилота, с учётом текущих сессий). */
+  getGamesTimeToday: () => {
+    const { game } = get().getDisplayBreakdownToday()
+    return (game?.roma ?? 0) + (game?.kirill ?? 0)
+  },
+
+  /** Сколько минут мультимедиа (обычные + полезные мультики) за сегодня. */
+  getMediaTimeToday: () => {
+    const { youtube } = get().getDisplayBreakdownToday()
+    return (youtube?.roma ?? 0) + (youtube?.kirill ?? 0)
   },
 
   /** Есть ли хотя бы один запущенный двигатель (для UI). */
@@ -578,15 +719,103 @@ export const useAppStore = create((set, get) => ({
         supabase.from('profiles').select('*').order('id'),
         supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(MAX_TRANSACTIONS),
       ])
-      const users = (profilesRes.data ?? []).map(profileToUser)
+      // CRITICAL: Ensure users are ordered with Kirill first, Roma second
+      const allUsers = (profilesRes.data ?? []).map(profileToUser)
+      const users = [
+        ...allUsers.filter((u) => u.id === 'kirill'),
+        ...allUsers.filter((u) => u.id === 'roma'),
+        ...allUsers.filter((u) => u.id !== 'kirill' && u.id !== 'roma'),
+      ]
       const transactions = (txRes.data ?? []).map(dbTxToStore)
       const profiles = profilesRes.data ?? []
+      
+      // CRITICAL: Recalculate raid progress from ALL non-burn transactions to ensure sync.
+      // RaidBoss tracks NET XP: sum of amounts for type=earn|spend (игровое сгорание type=burn игнорируем).
+      const calculatedRaidProgress = transactions
+        .filter((t) => t.type === 'earn' || t.type === 'spend')
+        .reduce((sum, t) => sum + t.amount, 0)
+      
       const savedRaid =
         typeof localStorage !== 'undefined' ? localStorage.getItem(RAID_STORAGE_KEY) : null
-      const raidProgress =
-        savedRaid != null ? Math.min(RAID_TARGET, Math.max(0, Number(savedRaid) || 0)) : get().raidProgress ?? 0
+      const localRaid =
+        savedRaid != null ? Math.max(0, Number(savedRaid) || 0) : get().raidProgress ?? 0
 
-      set({ users, transactions, raidProgress, isLoading: false })
+      // Try to load raid_progress from settings; use calculated value as fallback/verification
+      let raidProgress = calculatedRaidProgress
+      try {
+        const { data: settingsRow } = await supabase
+          .from('settings')
+          .select('key, value')
+          .eq('key', 'raid_progress')
+          .maybeSingle()
+        if (settingsRow && typeof settingsRow.value === 'number') {
+          const settingsValue = Number(settingsRow.value) || 0
+          // Use settings value, but if calculated differs significantly, log warning
+          raidProgress = settingsValue
+          if (Math.abs(settingsValue - calculatedRaidProgress) > 10) {
+            console.warn(
+              `Raid progress desync detected: settings=${settingsValue}, calculated=${calculatedRaidProgress}. Using settings value.`
+            )
+          }
+        } else {
+          // No settings value - use calculated from transactions
+          raidProgress = calculatedRaidProgress
+          // Sync calculated value to settings
+          try {
+            await supabase
+              .from('settings')
+              .upsert({ key: 'raid_progress', value: calculatedRaidProgress }, { onConflict: 'key' })
+          } catch (e) {
+            console.warn('fetchState: failed to sync calculated raid progress to settings', e)
+          }
+        }
+      } catch (e) {
+        console.warn('fetchState: raid_progress settings load failed, using calculated value', e)
+        raidProgress = calculatedRaidProgress
+      }
+      
+      // Update localStorage with final value
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(RAID_STORAGE_KEY, String(raidProgress))
+      }
+
+      // Load today's time tracking from profiles
+      const today = getDateKey()
+      const lastActive = get().lastActiveDate
+      const todayTimeTracking = {}
+      
+      // If it's a new day, reset time tracking
+      if (lastActive !== today) {
+        profiles.forEach((profile) => {
+          if (PILOT_IDS.includes(profile.id)) {
+            todayTimeTracking[profile.id] = { game: 0, media: 0 }
+          }
+        })
+        // Reset in database
+        try {
+          await Promise.all(
+            PILOT_IDS.map((id) =>
+              supabase
+                .from('profiles')
+                .update({ today_game_time: 0, today_media_time: 0 })
+                .eq('id', id)
+            )
+          )
+        } catch (e) {
+          console.warn('fetchState: failed to reset time tracking for new day', e)
+        }
+      } else {
+        profiles.forEach((profile) => {
+          if (PILOT_IDS.includes(profile.id)) {
+            todayTimeTracking[profile.id] = {
+              game: Number(profile.today_game_time ?? 0),
+              media: Number(profile.today_media_time ?? 0),
+            }
+          }
+        })
+      }
+
+      set({ users, transactions, raidProgress, todayTimeTracking, isLoading: false })
 
       const now = Date.now()
       let lastOfflineSyncToast = null
@@ -623,7 +852,9 @@ export const useAppStore = create((set, get) => ({
         let sessionTotalBurned = activeBurnTx ? Math.max(0, -Number(activeBurnTx.amount)) : 0
 
         if (!activeSessionId) {
-          const desc = sessionMode === 'youtube' ? '📺 Сессия (Start)' : '🎮 Игровая сессия (Start)'
+          let desc = '🎮 Игровая сессия (Start)'
+          if (sessionMode === 'youtube') desc = '📺 Сессия (Start)'
+          else if (sessionMode === 'good') desc = '🍏 Полезная сессия (Start)'
           const { data: newRow } = await supabase
             .from('transactions')
             .insert({
@@ -653,7 +884,7 @@ export const useAppStore = create((set, get) => ({
               status: 'RUNNING',
               sessionMinutes,
               burnerActive: true,
-              mode: sessionMode === 'youtube' ? 'youtube' : 'game',
+              mode: sessionMode === 'youtube' ? 'youtube' : sessionMode === 'good' ? 'good' : 'game',
               sessionStartAt,
               lastBurnAt: lastBurnAt ?? sessionStartAt,
               sessionBalanceAtStart: balanceAtStart,
@@ -666,11 +897,40 @@ export const useAppStore = create((set, get) => ({
         if (burnableMinutes >= 1) {
           const sessionMinutesAlready = sessionMinutes - burnableMinutes
           let burned = 0
+          // Track time locally as we process each minute
+          let localGameTime = get().getTodayGameTime(pilotId)
+          let localMediaTime = get().getTodayMediaTime(pilotId)
+          
           for (let i = 0; i < burnableMinutes; i++) {
             const u = get().users.find((x) => x.id === pilotId)
             if (u && u.balance <= 0) break
-            const totalBefore = get().getGamingMinutesToday()
-            const rate = weekend ? 1 : totalBefore + 1 > 60 ? 2 : 1
+
+            // Calculate burn rate using tiered system based on current accumulated time
+            let rate
+            if (sessionMode === 'good') {
+              // Полезные мультики: use tiered media rate
+              rate = calculateBurnRate('good', localGameTime, localMediaTime)
+            } else if (sessionMode === 'youtube') {
+              // Media mode: tiered rate
+              rate = calculateBurnRate('youtube', localGameTime, localMediaTime)
+            } else {
+              // Game mode: tiered rate
+              rate = calculateBurnRate('game', localGameTime, localMediaTime)
+            }
+
+            // Update local time tracking for next iteration
+            if (sessionMode === 'good' || sessionMode === 'youtube') {
+              localMediaTime += 1
+            } else {
+              localGameTime += 1
+            }
+
+            if (rate === 0) {
+              // 0 XP, но считаем экранное время.
+              get().addGamingMinutesToday(1, sessionMode, [pilotId])
+              continue
+            }
+
             const amount = u ? Math.min(rate, u.balance) : rate
             if (amount <= 0) break
             get().updateSessionBurn(pilotId, amount, sessionMinutesAlready + i + 1, sessionMode)
@@ -688,8 +948,10 @@ export const useAppStore = create((set, get) => ({
         if (actualElapsedMinutes > maxPossibleMinutes) {
           const txId = get().pilots[pilotId]?.activeSessionId
           if (txId) {
-            const mode = sessionMode === 'youtube' ? 'youtube' : 'game'
-            const desc = mode === 'youtube' ? `📺 Сессия (${sessionMinutes} мин)` : `🎮 Игровая сессия (${sessionMinutes} мин)`
+            const mode = sessionMode === 'youtube' ? 'youtube' : sessionMode === 'good' ? 'good' : 'game'
+            let desc = `🎮 Игровая сессия (${sessionMinutes} мин)`
+            if (mode === 'youtube') desc = `📺 Сессия (${sessionMinutes} мин)`
+            else if (mode === 'good') desc = `🍏 Полезная сессия (${sessionMinutes} мин)`
             try {
               await supabase.from('transactions').update({ description: desc, status: 'completed' }).eq('id', txId)
             } catch (e) {
@@ -738,6 +1000,54 @@ export const useAppStore = create((set, get) => ({
   /** Set users (e.g. from realtime). Keeps shape { id, name, balance, color }. */
   setUsers: (users) => set({ users }),
 
+  /**
+   * Apply raid boss damage when XP is earned.
+   * Uses optimistic update, then syncs with Supabase settings (key: raid_progress).
+   */
+  /**
+   * CRITICAL: Raid Boss contribution — tracks NET XP (earn/spend, excluding burn).
+   * Positive amount → boss получает урон. Отрицательное → босс «лечится».
+   * Позволяем overflow выше RAID_TARGET, но не опускаемся ниже 0.
+   */
+  damageBoss: (amount) => {
+    const delta = Number(amount)
+    if (!delta || !Number.isFinite(delta)) return
+
+    // Optimistic local update so UI (RaidBoss) reacts instantly.
+    set((state) => {
+      const current = state.raidProgress ?? 0
+      const next = Math.max(0, current + delta)
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(RAID_STORAGE_KEY, String(next))
+      }
+      return { raidProgress: next }
+    })
+
+    // Sync with settings table; use remote value as source of truth when possible.
+    ;(async () => {
+      try {
+        const { data: settingsRow } = await supabase
+          .from('settings')
+          .select('key, value')
+          .eq('key', 'raid_progress')
+          .maybeSingle()
+        const currentRemote = settingsRow && typeof settingsRow.value === 'number'
+          ? Number(settingsRow.value) || 0
+          : 0
+        const next = Math.max(0, currentRemote + delta)
+        await supabase
+          .from('settings')
+          .upsert({ key: 'raid_progress', value: next }, { onConflict: 'key' })
+        set({ raidProgress: next })
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(RAID_STORAGE_KEY, String(next))
+        }
+      } catch (e) {
+        console.warn('damageBoss settings sync (optional):', e)
+      }
+    })()
+  },
+
   addPoints: (userId, amount, reason) => {
     const num = Math.abs(Number(amount))
     if (!num || num <= 0) return
@@ -750,17 +1060,12 @@ export const useAppStore = create((set, get) => ({
       amount: num,
       type: 'earn',
     }
-    set((state) => {
-      const nextRaid = Math.min(RAID_TARGET, (state.raidProgress ?? 0) + num)
-      if (typeof localStorage !== 'undefined') localStorage.setItem(RAID_STORAGE_KEY, String(nextRaid))
-      return {
-        users: state.users.map((u) =>
-          u.id === userId ? { ...u, balance: u.balance + num } : u
-        ),
-        transactions: [entry, ...(state.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
-        raidProgress: nextRaid,
-      }
-    })
+    set((state) => ({
+      users: state.users.map((u) =>
+        u.id === userId ? { ...u, balance: u.balance + num } : u
+      ),
+      transactions: [entry, ...(state.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
+    }))
     ;(async () => {
       try {
         const { data: txRow } = await supabase
@@ -775,6 +1080,9 @@ export const useAppStore = create((set, get) => ({
           .single()
         const user = get().users.find((u) => u.id === userId)
         await supabase.from('profiles').update({ balance: user?.balance ?? 0 }).eq('id', userId)
+
+        // Raid Boss: apply net positive XP as damage.
+        get().damageBoss(num)
         if (txRow) {
           set((state) => ({
             transactions: state.transactions.map((t) =>
@@ -788,9 +1096,23 @@ export const useAppStore = create((set, get) => ({
     })()
   },
 
+  /**
+   * Reset raid progress to 0. Note: This does NOT delete transactions,
+   * so recalculating from transactions will restore progress.
+   * For a true reset, transactions should be cleared separately.
+   */
   resetRaidProgress: () => {
     set({ raidProgress: 0 })
     if (typeof localStorage !== 'undefined') localStorage.setItem(RAID_STORAGE_KEY, '0')
+    ;(async () => {
+      try {
+        await supabase
+          .from('settings')
+          .upsert({ key: 'raid_progress', value: 0 }, { onConflict: 'key' })
+      } catch (e) {
+        console.warn('resetRaidProgress settings sync (optional):', e)
+      }
+    })()
   },
 
   spendPoints: (userId, amount, reason) => {
@@ -825,6 +1147,10 @@ export const useAppStore = create((set, get) => ({
           .single()
         const user = get().users.find((u) => u.id === userId)
         await supabase.from('profiles').update({ balance: Math.max(0, user?.balance ?? 0) }).eq('id', userId)
+
+        // Raid Boss: negative XP (штрафы/ручное снятие) лечит босса.
+        get().damageBoss(-num)
+
         if (txRow) {
           set((state) => ({
             transactions: state.transactions.map((t) =>
@@ -882,18 +1208,48 @@ export const useAppStore = create((set, get) => ({
     const tx = (state.transactions ?? []).find((t) => t.id === transactionId)
     if (!tx) return
     const isTemp = String(transactionId).startsWith('temp-')
-    set((s) => ({
-      users: s.users.map((u) =>
+
+    set((s) => {
+      // Invert transaction impact on balance.
+      const updatedUsers = s.users.map((u) =>
         u.id === tx.userId ? { ...u, balance: Math.max(0, u.balance - tx.amount) } : u
-      ),
-      transactions: (s.transactions ?? []).filter((t) => t.id !== transactionId),
-    }))
+      )
+
+      // CRITICAL: Roll back raid progress for NON-burn transactions.
+      // RaidBoss = sum(amount) по earn|spend, поэтому удаление даёт delta = -tx.amount.
+      let nextRaid = s.raidProgress ?? 0
+      if (tx.type === 'earn' || tx.type === 'spend') {
+        nextRaid = Math.max(0, nextRaid - tx.amount)
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(RAID_STORAGE_KEY, String(nextRaid))
+        }
+      }
+
+      return {
+        users: updatedUsers,
+        transactions: (s.transactions ?? []).filter((t) => t.id !== transactionId),
+        raidProgress: nextRaid,
+      }
+    })
+    
     if (!isTemp) {
       ;(async () => {
         try {
           await supabase.from('transactions').delete().eq('id', transactionId)
           const user = get().users.find((u) => u.id === tx.userId)
           await supabase.from('profiles').update({ balance: Math.max(0, user?.balance ?? 0) }).eq('id', tx.userId)
+
+          // CRITICAL: Sync raid progress rollback to Supabase for NON-burn transactions.
+          if (tx.type === 'earn' || tx.type === 'spend') {
+            const raidProgress = get().raidProgress ?? 0
+            try {
+              await supabase
+                .from('settings')
+                .upsert({ key: 'raid_progress', value: raidProgress }, { onConflict: 'key' })
+            } catch (e) {
+              console.warn('removeTransaction raid_progress sync (optional):', e)
+            }
+          }
         } catch (e) {
           console.error('removeTransaction sync:', e)
         }

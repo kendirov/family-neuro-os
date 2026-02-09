@@ -62,7 +62,9 @@ function TaskButton({ task, status, onComplete, disabled, accentColor, className
         'relative rounded-xl border-2 min-h-[40px] px-2 py-2 flex items-center justify-center gap-1.5 font-gaming text-[10px] font-bold uppercase tracking-wider transition touch-manipulation truncate',
         borderClass,
         bgClass,
-        completed && 'opacity-50 grayscale border-slate-600/50 bg-slate-800/50 cursor-default',
+        completed && 'opacity-50 grayscale bg-slate-800/50 cursor-default',
+        completed && !isPenalty && 'border-emerald-500/80',
+        completed && isPenalty && 'border-red-500/80',
         className
       )}
       whileTap={!completed && !disabled ? { scale: 0.97 } : undefined}
@@ -81,18 +83,35 @@ function TaskButton({ task, status, onComplete, disabled, accentColor, className
         </button>
       )}
       {completed && (
-        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <Check className="h-4 w-4 text-emerald-400" strokeWidth={2.5} />
+        <span className="absolute top-1 left-1 z-10 flex items-center justify-center pointer-events-none">
+          {isPenalty ? (
+            <X className="h-3.5 w-3.5 text-red-400 drop-shadow-[0_0_4px_rgba(248,113,113,0.8)]" strokeWidth={2.5} />
+          ) : (
+            <Check className="h-3.5 w-3.5 text-emerald-400 drop-shadow-[0_0_4px_rgba(52,211,153,0.8)]" strokeWidth={2.5} />
+          )}
         </span>
       )}
-      <span className={cn('shrink-0', completed && 'opacity-0')} aria-hidden>
+      <span className="shrink-0" aria-hidden>
         {task.emoji}
       </span>
-        <span className={cn('truncate min-w-0', completed && 'opacity-0')}>{task.label}</span>
+      <span
+        className={cn(
+          'truncate min-w-0',
+          completed && 'line-through'
+        )}
+      >
+        {task.label}
+      </span>
       <span
         className={cn(
           'shrink-0 tabular-nums text-[9px]',
-          completed ? 'opacity-0' : isPenalty ? 'text-red-300' : variant === 'base' ? 'text-indigo-300/90' : 'text-amber-300/90'
+          completed
+            ? 'line-through text-slate-400/80'
+            : isPenalty
+              ? 'text-red-300'
+              : variant === 'base'
+                ? 'text-indigo-300/90'
+                : 'text-amber-300/90'
         )}
       >
         {task.credits >= 0 ? `+${task.credits}` : task.credits}
@@ -134,13 +153,25 @@ function FoodRow({ main, modifiers = [], getStatus, onTaskComplete, disabled, on
           </button>
         )}
         {mainCompleted && (
-          <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <Check className="h-3.5 w-3.5 text-emerald-400" strokeWidth={2.5} />
+          <span className="absolute top-0.5 left-0.5 z-10 flex items-center justify-center pointer-events-none">
+            <Check className="h-3.5 w-3.5 text-emerald-400 drop-shadow-[0_0_4px_rgba(52,211,153,0.9)]" strokeWidth={2.5} />
           </span>
         )}
-        <span className={cn('shrink-0', mainCompleted && 'opacity-0')}>{main.emoji}</span>
-        <span className={cn('truncate min-w-0', mainCompleted && 'opacity-0')}>{(main.shortLabel ?? main.label)}</span>
-        <span className={cn('shrink-0 tabular-nums text-[8px]', mainCompleted ? 'opacity-0' : 'text-amber-300')}>
+        <span className="shrink-0">{main.emoji}</span>
+        <span
+          className={cn(
+            'truncate min-w-0',
+            mainCompleted && 'line-through'
+          )}
+        >
+          {main.shortLabel ?? main.label}
+        </span>
+        <span
+          className={cn(
+            'shrink-0 tabular-nums text-[8px]',
+            mainCompleted ? 'line-through text-slate-400/80' : 'text-amber-300'
+          )}
+        >
           +{main.credits}
         </span>
       </motion.button>

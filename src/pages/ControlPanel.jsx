@@ -121,7 +121,9 @@ function UserColumn({ user, onShowToast }) {
 
 export function ControlPanel() {
   const users = useAppStore((s) => s.users)
-  const [roma, kirill] = users
+  // CRITICAL: Ensure correct order - Kirill first, Roma second
+  const kirill = users.find((u) => u.id === 'kirill')
+  const roma = users.find((u) => u.id === 'roma')
   const [toast, setToast] = useState(null)
 
   return (

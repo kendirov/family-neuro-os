@@ -23,8 +23,11 @@ export function RaidBoss({ isCommander = false }) {
   }, [raidProgress])
 
   const isWin = raidProgress >= RAID_TARGET
+  // CRITICAL: Allow overflow - show actual HP even if negative (boss defeated)
   const currentHP = Math.max(0, RAID_TARGET - raidProgress)
-  const hpPercent = Math.min(100, (currentHP / RAID_TARGET) * 100)
+  // Visual bar caps at 100% but we track overflow
+  const hpPercent = Math.min(100, Math.max(0, (currentHP / RAID_TARGET) * 100))
+  const overflowAmount = raidProgress > RAID_TARGET ? raidProgress - RAID_TARGET : 0
 
   return (
     <div
@@ -89,9 +92,22 @@ export function RaidBoss({ isCommander = false }) {
             </div>
           </div>
 
-          {/* BOSS HP text */}
+          {/* BOSS HP text - shows overflow if defeated */}
           <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-200/90 mt-2 tabular-nums">
-            BOSS HP: {currentHP} / {RAID_TARGET}
+            {isWin ? (
+              <>
+                BOSS DEFEATED! 🎉 (+{overflowAmount} overflow)
+              </>
+            ) : (
+              <>
+                BOSS HP: {currentHP} / {RAID_TARGET}
+              </>
+            )}
+          </p>
+          {/* Progress text showing actual progress */}
+          <p className="font-mono text-[9px] text-slate-400/80 mt-0.5 tabular-nums">
+            Progress: {raidProgress} / {RAID_TARGET}
+            {overflowAmount > 0 && ` (+${overflowAmount})`}
           </p>
 
           {/* Health bar: dark grey bg, red-to-orange fill, thick gold border */}

@@ -21,13 +21,13 @@ import { ControlCenter } from '@/components/ControlCenter'
 import { CountUpNumber } from '@/components/CountUpNumber'
 import { SupplyDepotSchedule } from '@/components/SupplyDepotSchedule'
 import { TransactionModal } from '@/components/TransactionModal'
-import { SchoolSchedule } from '@/components/SchoolSchedule'
 import { WallSchedule } from '@/components/WallSchedule'
 import { TodayStats } from '@/components/TodayStats'
 import { motion } from 'framer-motion'
 import { Wallet, Coins } from 'lucide-react'
 import { WheelOfFortune } from '@/components/WheelOfFortune'
 import { RaidBoss } from '@/components/RaidBoss'
+import { GlobalStatus } from '@/components/GlobalStatus'
 
 /** Mission tasks from centralized task config (4 phases: Утро, Школа, Питание, Дом и сон). */
 const MISSION_TASKS_BY_CATEGORY = getMissionTasksByCategory()
@@ -67,7 +67,8 @@ function GodModeCommandBar({ roma, kirill, onShowToast, disabled }) {
 
   const num = Number(input.trim())
   const isValid = !Number.isNaN(num) && num !== 0 && Math.abs(num) <= 999999
-  const userIds = target === 'both' ? [roma?.id, kirill?.id].filter(Boolean) : target === 'roma' ? [roma?.id] : [kirill?.id]
+  // CRITICAL: Maintain order - Kirill first, Roma second
+  const userIds = target === 'both' ? [kirill?.id, roma?.id].filter(Boolean) : target === 'roma' ? [roma?.id] : [kirill?.id]
 
   const handleApply = () => {
     if (!isValid || userIds.length === 0) return
@@ -308,7 +309,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         )}
       </div>
 
-      {/* Score: Баланс + За сегодня */}
+      {/* Score: ЗАРАБОТАНО СЕГОДНЯ (hero) + маленький баланс */}
       {(() => {
         const todayStart = getTodayStartTs()
         const todayEnd = todayStart + 24 * 60 * 60 * 1000
@@ -319,17 +320,23 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
           <div className="mb-3 shrink-0 rounded-2xl border-[3px] border-slate-600/60 bg-slate-800/90 px-4 py-4 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
             <div className="flex flex-col gap-2">
               <div className="flex flex-col items-center">
-                <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">Баланс</span>
-                <span className="hud-score-total flex items-baseline justify-center gap-0.5">
-                  <CountUpNumber value={user.balance} duration={400} />
-                  <span className="font-sans-data text-sm text-amber-400/90">⚡ XP</span>
+                <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">
+                  ЗАРАБОТАНО СЕГОДНЯ
                 </span>
+                <span className="hud-score-earned text-emerald-300 drop-shadow-[0_0_10px_rgba(16,185,129,0.7)]">
+                  +{todayEarned}
+                </span>
+                <span className="font-sans-data text-[10px] text-amber-300">⚡ XP</span>
               </div>
               <div className="h-px w-full bg-slate-600/60 rounded-full" aria-hidden />
-              <div className="flex flex-col items-center">
-                <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">За сегодня</span>
-                <span className="hud-score-earned">+{todayEarned}</span>
-                <span className="font-sans-data text-[10px] text-slate-500">⚡ XP</span>
+              <div className="flex items-center justify-between w-full">
+                <span className="font-sans-data text-[10px] text-slate-500 uppercase tracking-wider">
+                  Баланс
+                </span>
+                <span className="hud-score-total flex items-baseline justify-center gap-0.5 text-amber-300/90">
+                  <CountUpNumber value={user.balance} duration={400} />
+                  <span className="font-sans-data text-[10px]">⚡ XP</span>
+                </span>
               </div>
             </div>
           </div>
@@ -391,7 +398,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         <h3 className="font-mono text-[10px] text-slate-500 uppercase tracking-wider px-2 py-1.5 border-b border-slate-700/50 shrink-0">
           Журнал операций
         </h3>
-        <ul className="font-mono text-[11px] text-slate-400 space-y-0 overflow-y-auto flex-1 min-h-0 px-2 py-1.5 list-none [scrollbar-color:theme(colors.slate.600)_transparent)]">
+        <ul className="font-mono text-[11px] text-slate-400 space-y-0 overflow-y-auto flex-1 min-h-0 max-h-60 px-2 py-1.5 list-none [scrollbar-color:theme(colors.slate.600)_transparent)]">
           {personalLog.length === 0 ? (
             <li className="text-slate-600 py-3">— записей нет</li>
           ) : (
@@ -892,7 +899,9 @@ export function Dashboard({ mode = 'pilot' }) {
   const transactions = useAppStore((s) => s.transactions ?? [])
   const removeTransaction = useAppStore((s) => s.removeTransaction)
   const panelLocked = useAppStore((s) => s.panelLocked)
-  const [roma, kirill] = users
+  // CRITICAL: Ensure correct order - Kirill first, Roma second
+  const kirill = users.find((u) => u.id === 'kirill')
+  const roma = users.find((u) => u.id === 'roma')
   const [toast, setToast] = useState(null)
   const [wheelPilot, setWheelPilot] = useState(null) // 'roma' | 'kirill' | null — single pilot for wheel
   const [wheelOpen, setWheelOpen] = useState(false)
@@ -925,7 +934,7 @@ export function Dashboard({ mode = 'pilot' }) {
 
   const handleRemoveTransaction = (transactionId) => {
     removeTransaction(transactionId)
-    setToast({ message: 'ОПЕРАЦИЯ ОТМЕНЕНА', variant: 'success' })
+    setToast({ message: 'Операция отменена. Баланс восстановлен.', variant: 'success' })
   }
 
   const simulateDayReset = useAppStore((s) => s.simulateDayReset)
@@ -937,7 +946,16 @@ export function Dashboard({ mode = 'pilot' }) {
   return (
     <KioskLayout>
       <Header />
-      <SchoolSchedule />
+      <GlobalStatus />
+      {/* Weekly flight plan header: 5-day grid schedule */}
+      <div className="px-4 pt-2 md:px-6">
+        <div className="rounded-2xl border-2 border-slate-700/80 bg-slate-900/70 shadow-[0_4px_18px_rgba(0,0,0,0.5)] px-3 py-3 sm:px-4 sm:py-3">
+          <h2 className="font-mono text-[10px] sm:text-[11px] text-slate-400 uppercase tracking-[0.2em] mb-2">
+            ПОЛЁТНЫЙ ПЛАН — 5 ДНЕЙ
+          </h2>
+          <WallSchedule />
+        </div>
+      </div>
       <main className="dashboard-grid flex-1 min-h-0 flex flex-col overflow-y-auto p-4">
         {/* 2-column grid: Left = Pilots, Right = Control Center */}
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden gap-4">
@@ -970,9 +988,11 @@ export function Dashboard({ mode = 'pilot' }) {
             />
           )}
           <div className="flex flex-col lg:flex-row flex-1 gap-3 min-h-0 min-w-0 overflow-y-auto mt-2">
-            {roma && (
+            {/* CRITICAL: Kirill LEFT, Roma RIGHT */}
+            {/* CRITICAL: Kirill LEFT, Roma RIGHT */}
+            {kirill && (
               <SupplyDepotColumn
-                user={roma}
+                user={kirill}
                 onShowToast={setToast}
                 locked={isCommander ? false : panelLocked}
                 readOnly={isPilot}
@@ -982,9 +1002,9 @@ export function Dashboard({ mode = 'pilot' }) {
                 onRemoveTransaction={handleRemoveTransaction}
               />
             )}
-            {kirill && (
+            {roma && (
               <SupplyDepotColumn
-                user={kirill}
+                user={roma}
                 onShowToast={setToast}
                 locked={isCommander ? false : panelLocked}
                 readOnly={isPilot}
@@ -1032,10 +1052,6 @@ export function Dashboard({ mode = 'pilot' }) {
             {isCommander && <WeeklyAnalytics />}
           </div>
         </section>
-        </div>
-        {/* Footer: full-width Schedule below the 2-column grid */}
-        <div className="col-span-12 mt-4 w-full">
-          <WallSchedule />
         </div>
       </main>
 

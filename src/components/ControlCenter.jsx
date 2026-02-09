@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { Gamepad2, Tv, Flame } from 'lucide-react'
+import { Gamepad2, Tv, Flame, Apple } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
 import { playEngineRev, playCashRegister, playError, playBurnTick } from '@/lib/sounds'
 import { cn } from '@/lib/utils'
@@ -8,11 +8,19 @@ import { PilotEngine } from '@/components/PilotEngine'
 import { WheelBanner } from '@/components/WheelBanner'
 
 const MODES = [
-  { id: 'game', label: 'ИГРАТЬ', Icon: Gamepad2, color: 'blue' },
-  { id: 'youtube', label: 'ЮТУБ / МУЛЬТИКИ', Icon: Tv, color: 'pink' },
+  { id: 'game', label: 'ИГРЫ', Icon: Gamepad2, color: 'blue', emoji: '🎮' },
+  { id: 'youtube', label: 'МУЛЬТИКИ', Icon: Tv, color: 'pink', emoji: '📺' },
+  { id: 'good', label: 'ПОЛЕЗНОЕ', Icon: Apple, color: 'green', emoji: '🍏' },
 ]
 
-const PILOT_IDS = ['roma', 'kirill']
+// Simplified mode groups: Games vs Media (Cartoons)
+const MODE_GROUPS = [
+  { id: 'game', label: 'ИГРЫ', Icon: Gamepad2, color: 'blue', emoji: '🎮' },
+  { id: 'media', label: 'МУЛЬТИКИ', Icon: Tv, color: 'orange', emoji: '📺', modes: ['youtube', 'good'] },
+]
+
+// CRITICAL: Order must be Kirill first, Roma second (for consistent left/right layout)
+const PILOT_IDS = ['kirill', 'roma']
 
 /** Будни (Пн–Пт): до 1 ч — 1 кр/мин, после 1 ч — 2 кр/мин. Выходные — всегда 1 кр/мин. */
 function isWeekday() {
@@ -23,6 +31,145 @@ function isWeekday() {
 /** Date key for today (YYYY-MM-DD). */
 function getDateKey() {
   return new Date().toISOString().slice(0, 10)
+}
+
+/**
+ * BurnTimeline: Visual timeline showing burn rate zones and current position.
+ * Shows colored zones (Green/Yellow/Red for Media, Blue/Red for Games) with a needle indicator.
+ */
+function BurnTimeline({ pilotId, mode }) {
+  const getTodayGameTime = useAppStore((s) => s.getTodayGameTime)
+  const getTodayMediaTime = useAppStore((s) => s.getTodayMediaTime)
+  
+  const isMediaMode = mode === 'youtube' || mode === 'good'
+  const currentMinutes = isMediaMode ? getTodayMediaTime(pilotId) : getTodayGameTime(pilotId)
+  
+  // Zone configuration
+  const maxScale = isMediaMode ? 60 : 60 // Both use 60 as max scale
+  const needlePosition = Math.min(100, (currentMinutes / maxScale) * 100)
+  
+  // Get current rate and zone info
+  let currentRate = ''
+  let currentZoneLabel = ''
+  let currentZoneColor = ''
+  
+  if (isMediaMode) {
+    if (currentMinutes < 20) {
+      currentRate = '0 XP/мин'
+      currentZoneLabel = 'Бесплатно'
+      currentZoneColor = 'text-green-300'
+    } else if (currentMinutes < 60) {
+      currentRate = '0.5 XP/мин'
+      currentZoneLabel = 'Тариф 0.5x'
+      currentZoneColor = 'text-yellow-300'
+    } else {
+      currentRate = '2 XP/мин'
+      currentZoneLabel = 'Перегрузка 2x'
+      currentZoneColor = 'text-red-400'
+    }
+  } else {
+    // Game mode
+    if (currentMinutes < 60) {
+      currentRate = '1 XP/мин'
+      currentZoneLabel = 'Норма 1x'
+      currentZoneColor = 'text-cyan-300'
+    } else {
+      currentRate = '2 XP/мин'
+      currentZoneLabel = 'Перегрузка 2x'
+      currentZoneColor = 'text-red-400'
+    }
+  }
+  
+  return (
+    <div className="w-full space-y-2">
+      {/* Timeline Bar */}
+      <div className="relative h-6 rounded-lg border-2 border-slate-600/60 bg-slate-900/80 overflow-hidden">
+        {/* Zone segments */}
+        {isMediaMode ? (
+          <>
+            {/* Green zone: 0-20 min (33.3% of 60) */}
+            <div
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-500 via-emerald-400 to-green-500"
+              style={{ width: `${(20 / maxScale) * 100}%` }}
+            />
+            {/* Yellow zone: 20-60 min (66.7% of 60) */}
+            <div
+              className="absolute inset-y-0 bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-500"
+              style={{ left: `${(20 / maxScale) * 100}%`, width: `${((60 - 20) / maxScale) * 100}%` }}
+            />
+            {/* Red zone: 60+ min (overflow) - striped pattern */}
+            {currentMinutes >= 60 && (
+              <div
+                className="absolute inset-y-0 bg-gradient-to-r from-red-600 via-red-500 to-red-600 animate-pulse"
+                style={{
+                  left: `${(60 / maxScale) * 100}%`,
+                  width: `${100 - (60 / maxScale) * 100}%`,
+                  backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.2) 4px, rgba(0,0,0,0.2) 8px)',
+                }}
+              />
+            )}
+            {/* Zone labels */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="absolute left-0 text-[8px] font-mono font-bold text-green-200 px-1">
+                БЕСПЛАТНО
+              </div>
+              <div className="absolute left-[33.3%] text-[8px] font-mono font-bold text-yellow-200 px-1">
+                0.5x
+              </div>
+              <div className="absolute left-[66.7%] text-[8px] font-mono font-bold text-red-200 px-1">
+                2x
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Blue zone: 0-60 min */}
+            <div
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-500 via-blue-400 to-cyan-500"
+              style={{ width: `${(60 / maxScale) * 100}%` }}
+            />
+            {/* Red zone: 60+ min (overflow) - striped pattern */}
+            {currentMinutes >= 60 && (
+              <div
+                className="absolute inset-y-0 bg-gradient-to-r from-red-600 via-red-500 to-red-600 animate-pulse"
+                style={{
+                  left: `${(60 / maxScale) * 100}%`,
+                  width: `${100 - (60 / maxScale) * 100}%`,
+                  backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.2) 4px, rgba(0,0,0,0.2) 8px)',
+                }}
+              />
+            )}
+            {/* Zone labels */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="absolute left-0 text-[8px] font-mono font-bold text-cyan-200 px-1">
+                НОРМА 1x
+              </div>
+              <div className="absolute left-[50%] text-[8px] font-mono font-bold text-red-200 px-1">
+                2x
+              </div>
+            </div>
+          </>
+        )}
+        
+        {/* Needle indicator - glowing white triangle and line */}
+        <motion.div
+          className="absolute top-0 bottom-0 z-20 transition-all duration-500 ease-out"
+          style={{ left: `${Math.min(100, Math.max(0, needlePosition))}%` }}
+          initial={false}
+        >
+          {/* Triangle pointer */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-b-[10px] border-l-transparent border-r-transparent border-b-white drop-shadow-[0_0_8px_rgba(255,255,255,1)]" />
+          {/* Vertical line */}
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[2px] bg-white shadow-[0_0_8px_rgba(255,255,255,1),inset_0_0_4px_rgba(255,255,255,0.8)]" />
+        </motion.div>
+      </div>
+      
+      {/* Text feedback */}
+      <p className={cn('font-mono text-[10px] uppercase tracking-wider text-center', currentZoneColor)}>
+        Потрачено: {currentMinutes} мин (Тариф: {currentZoneLabel} — {currentRate})
+      </p>
+    </div>
+  )
 }
 
 /** Reactor Core: heat gauge for total daily play time. Weekday: 0–45 зелёный, 45–60 жёлтый, 60+ красный пульс. Weekend: фиолет/золото. */
@@ -163,6 +310,8 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
   const pilots = useAppStore((s) => s.pilots)
   const updateSessionBurn = useAppStore((s) => s.updateSessionBurn)
   const getGamingMinutesToday = useAppStore((s) => s.getGamingMinutesToday)
+  const getTodayGameTime = useAppStore((s) => s.getTodayGameTime)
+  const getTodayMediaTime = useAppStore((s) => s.getTodayMediaTime)
   const startEngineStore = useAppStore((s) => s.startEngine)
   const pauseEngineStore = useAppStore((s) => s.pauseEngine)
   const resumeEngineStore = useAppStore((s) => s.resumeEngine)
@@ -170,6 +319,7 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
   const setPilotSessionMinutes = useAppStore((s) => s.setPilotSessionMinutes)
   const updateLastBurnAt = useAppStore((s) => s.updateLastBurnAt)
   const setLastOfflineSyncToast = useAppStore((s) => s.setLastOfflineSyncToast)
+  const addGamingMinutesToday = useAppStore((s) => s.addGamingMinutesToday)
 
   const [mode, setMode] = useState('game')
   const [tick, setTick] = useState(0)
@@ -307,9 +457,13 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         return
       }
 
-      const weekend = !isWeekday() // Sat/Sun: never overdrive, always 1 XP/min
       const maxMinute = Math.min(currentMinute, cap)
       let burned = 0
+      // Track time locally as we process each minute to ensure correct tier calculation
+      const initialState = useAppStore.getState()
+      let localGameTime = initialState.getTodayGameTime(id)
+      let localMediaTime = initialState.getTodayMediaTime(id)
+      
       for (let m = oldLast + 1; m <= maxMinute; m++) {
         const nowState = useAppStore.getState()
         const pilotUser = nowState.users.find((x) => x.id === id)
@@ -319,11 +473,42 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
           lastDeductedMinuteRef.current[id] = oldLast
           return
         }
-        const totalBeforeThisMinute = nowState.getGamingMinutesToday()
-        const rate = weekend ? 1 : totalBeforeThisMinute + 1 > 60 ? 2 : 1
+
+        const mode = p.mode ?? 'game'
+        // Calculate burn rate using tiered system based on current accumulated time
+        let rate
+        if (mode === 'good') {
+          // Media mode (good): tiered rate based on today_media_time
+          if (localMediaTime < 20) rate = 0
+          else if (localMediaTime < 60) rate = 0.5
+          else rate = 2
+        } else if (mode === 'youtube') {
+          // Media mode (youtube): tiered rate based on today_media_time
+          if (localMediaTime < 20) rate = 0
+          else if (localMediaTime < 60) rate = 0.5
+          else rate = 2
+        } else {
+          // Game mode: tiered rate based on today_game_time
+          if (localGameTime < 60) rate = 1
+          else rate = 2
+        }
+
+        // Update local time tracking for next iteration
+        if (mode === 'good' || mode === 'youtube') {
+          localMediaTime += 1
+        } else {
+          localGameTime += 1
+        }
+
+        if (rate === 0) {
+          // 0 XP, но считаем экранное время.
+          addGamingMinutesToday(1, mode, [id])
+          continue
+        }
+
         const amount = Math.min(rate, pilotUser.balance)
         if (amount <= 0) break
-        updateSessionBurn(id, amount, m, p.mode ?? 'game')
+        updateSessionBurn(id, amount, m, mode)
         burned += amount
       }
       if (burned > 0) playBurnTick()
@@ -354,32 +539,88 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         Двигатель сгорания
       </h3>
 
-      {/* Master controls: slim bar — режим + ЗАПУСТИТЬ ОБОИХ (зелёный) + ПАУЗА ВСЕМ (жёлтый) */}
-      <div className="flex flex-wrap items-center gap-2 py-2 border-b border-slate-600/60">
-        <div className="flex gap-1.5 shrink-0">
-          {MODES.map((m) => {
-            const Icon = m.Icon
-            const isSelected = mode === m.id
+      {/* Master controls: Large mode toggles + ЗАПУСТИТЬ ОБОИХ (зелёный) + ПАУЗА ВСЕМ (жёлтый) */}
+      <div className="flex flex-col gap-3 py-2 border-b border-slate-600/60">
+        {/* Large Mode Toggles: Games vs Media */}
+        <div className="flex gap-3">
+          {MODE_GROUPS.map((group) => {
+            const Icon = group.Icon
+            const isGameGroup = group.id === 'game'
+            const isMediaGroup = group.id === 'media'
+            const isSelected = isGameGroup
+              ? mode === 'game'
+              : isMediaGroup
+                ? mode === 'youtube' || mode === 'good'
+                : false
+            
             return (
               <button
-                key={m.id}
+                key={group.id}
                 type="button"
-                onClick={() => setMode(m.id)}
+                onClick={() => {
+                  if (isGameGroup) {
+                    setMode('game')
+                  } else if (isMediaGroup) {
+                    // Default to youtube for media group
+                    setMode('youtube')
+                  }
+                }}
                 disabled={anyRunning}
                 className={cn(
-                  'min-h-[40px] px-3 rounded-xl border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
-                  m.color === 'blue' &&
-                    (isSelected ? 'border-blue-500 bg-blue-500/25 text-blue-300' : 'border-slate-600 text-slate-400'),
-                  m.color === 'pink' &&
-                    (isSelected ? 'border-pink-500 bg-pink-500/25 text-pink-300' : 'border-slate-600 text-slate-400')
+                  'flex-1 min-h-[56px] px-4 rounded-xl border-[3px] font-gaming text-sm font-bold uppercase transition-all touch-manipulation flex items-center justify-center gap-2',
+                  isGameGroup &&
+                    (isSelected
+                      ? 'border-blue-500 bg-blue-500/25 text-blue-300 shadow-[0_0_20px_rgba(59,130,246,0.3)]'
+                      : 'border-slate-600 bg-slate-700/50 text-slate-400 hover:border-slate-500'),
+                  isMediaGroup &&
+                    (isSelected
+                      ? 'border-orange-500 bg-gradient-to-br from-orange-500/25 to-amber-500/25 text-orange-300 shadow-[0_0_20px_rgba(251,146,60,0.3)]'
+                      : 'border-slate-600 bg-slate-700/50 text-slate-400 hover:border-slate-500')
                 )}
               >
-                <Icon className="h-4 w-4" strokeWidth={2.5} />
-                <span>{m.id === 'game' ? 'ИГРА' : 'ЮТУБ'}</span>
+                <Icon className="h-6 w-6" strokeWidth={2.5} />
+                <span className="text-lg">{group.emoji}</span>
+                <span>{group.label}</span>
               </button>
             )
           })}
         </div>
+        
+        {/* Sub-mode selector for Media (only shown when media is selected) */}
+        {(mode === 'youtube' || mode === 'good') && (
+          <div className="flex gap-2 justify-center">
+            <button
+              type="button"
+              onClick={() => setMode('youtube')}
+              disabled={anyRunning}
+              className={cn(
+                'min-h-[36px] px-3 rounded-lg border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
+                mode === 'youtube'
+                  ? 'border-pink-500 bg-pink-500/25 text-pink-300'
+                  : 'border-slate-600 text-slate-400'
+              )}
+            >
+              <Tv className="h-3.5 w-3.5" strokeWidth={2.5} />
+              <span>📺 Обычные</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('good')}
+              disabled={anyRunning}
+              className={cn(
+                'min-h-[36px] px-3 rounded-lg border-2 font-gaming text-xs font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
+                mode === 'good'
+                  ? 'border-emerald-500 bg-emerald-500/25 text-emerald-200'
+                  : 'border-slate-600 text-slate-400'
+              )}
+            >
+              <Apple className="h-3.5 w-3.5" strokeWidth={2.5} />
+              <span>🍏 Полезные</span>
+            </button>
+          </div>
+        )}
+        
+        {/* Action buttons */}
         <div className="flex gap-2 flex-1 min-w-0 justify-end">
           <motion.button
             type="button"
@@ -410,11 +651,17 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         </div>
       </div>
 
-      {/* Dual cockpit: two pilot cards */}
+      {/* Visual Burn Rate Timeline for each pilot */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+        <BurnTimeline pilotId="kirill" mode={mode} />
+        <BurnTimeline pilotId="roma" mode={mode} />
+      </div>
+
+      {/* Dual cockpit: two pilot cards - Kirill LEFT, Roma RIGHT */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 min-h-0">
         <PilotEngine
-          id="roma"
-          elapsedSeconds={romaElapsedSeconds}
+          id="kirill"
+          elapsedSeconds={kirillElapsedSeconds}
           mode={mode}
           onStartRefs={onStartRefs}
           onPause={onPause}
@@ -422,8 +669,8 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
           onStop={onStop}
         />
         <PilotEngine
-          id="kirill"
-          elapsedSeconds={kirillElapsedSeconds}
+          id="roma"
+          elapsedSeconds={romaElapsedSeconds}
           mode={mode}
           onStartRefs={onStartRefs}
           onPause={onPause}
