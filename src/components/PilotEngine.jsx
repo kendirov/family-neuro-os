@@ -55,6 +55,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
   // IF timer_status === 'idle': Display 00:00
   // IF timer_status === 'paused': Display seconds_today formatted
   // IF timer_status === 'running': Display seconds_today + (NOW() - timer_start_at)
+  // CRITICAL: Always recalculate from server state, never rely on local counters
   const calculateElapsedSeconds = (pilotState) => {
     if (!pilotState || pilotState.timerStatus === 'idle') return 0
     
@@ -71,11 +72,16 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
     return secondsToday
   }
   
-  const [displayElapsedSeconds, setDisplayElapsedSeconds] = useState(() => calculateElapsedSeconds(pilot))
+  // CRITICAL: Use calculated elapsed from store if available (cold-start fix),
+  // otherwise calculate immediately from pilot state
+  const initialElapsed = pilot?.calculatedElapsedSeconds != null 
+    ? pilot.calculatedElapsedSeconds 
+    : calculateElapsedSeconds(pilot)
+  const [displayElapsedSeconds, setDisplayElapsedSeconds] = useState(initialElapsed)
   
   // Update display every second when timer is running (UI-only counter based on server timestamp)
-  // This "ticker" forces re-renders to update the calculated time display (NOW - start_at)
-  // It does NOT change data, only updates the visual text "14:01", "14:02"...
+  // CRITICAL: Always recalculate from server state (NOW - timer_start_at), never use local counters
+  // This ensures Device B immediately shows correct time (e.g., 05:43) on cold start
   useEffect(() => {
     // Если пилот отсутствует — показываем 0
     if (!pilot) {
@@ -90,7 +96,8 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
       return
     }
 
-    // Для idle/running пересчитываем через helper
+    // CRITICAL: Always recalculate from server state immediately
+    // This fixes cold-start: Device B jumps to correct time instantly
     const currentElapsed = calculateElapsedSeconds(pilot)
     setDisplayElapsedSeconds(currentElapsed)
     
@@ -100,17 +107,19 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
     }
     
     // Set up ticker: update display every second
-    // Read from store directly to get latest state (not closure)
+    // CRITICAL: Always recalculate from server state (Date.now() - timerStartAt)
+    // Never rely on local counters - this ensures correct time even after page refresh
     const interval = setInterval(() => {
       const currentPilot = useAppStore.getState().pilots?.[id]
-      if (currentPilot) {
+      if (currentPilot && currentPilot.timerStatus === 'running') {
+        // Always recalculate: NOW - timerStartAt + secondsToday
         const elapsed = calculateElapsedSeconds(currentPilot)
         setDisplayElapsedSeconds(elapsed)
       }
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [pilot?.timerStatus, pilot?.timerStartAt, pilot?.secondsToday, id])
+  }, [pilot?.timerStatus, pilot?.timerStartAt, pilot?.secondsToday, pilot?.calculatedElapsedSeconds, id])
   
   const elapsedSeconds = displayElapsedSeconds
 

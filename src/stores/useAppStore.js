@@ -1031,6 +1031,18 @@ export const useAppStore = create((set, get) => ({
         // Use timer_start_at if available, otherwise fall back to session_start_at
         const effectiveStartAt = timerStartAt ?? sessionStartAt
         
+        // CRITICAL: Calculate elapsed time immediately for running timers (cold-start fix)
+        // This ensures Device B shows correct time immediately on page load
+        let calculatedElapsed = 0
+        if (timerStatus === 'running' && timerStartAt) {
+          const now = Date.now()
+          const startMs = new Date(timerStartAt).getTime()
+          const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
+          calculatedElapsed = secondsToday + currentSegmentSeconds
+        } else if (timerStatus === 'paused') {
+          calculatedElapsed = secondsToday
+        }
+        
         set((s) => ({
           pilots: {
             ...s.pilots,
@@ -1048,6 +1060,8 @@ export const useAppStore = create((set, get) => ({
               timerStatus,
               timerStartAt,
               secondsToday: secondsToday,
+              // Store calculated elapsed for immediate display (cold-start fix)
+              calculatedElapsedSeconds: calculatedElapsed,
             },
           },
         }))
@@ -1160,9 +1174,36 @@ export const useAppStore = create((set, get) => ({
 
   /** Sync timer state from DB profile changes (for real-time multi-device sync). */
   /**
+   * Calculate elapsed seconds from server-authoritative timer state.
+   * Used for cold-start sync: calculates current display time immediately.
+   */
+  calculateElapsedFromProfile: (profileRow) => {
+    const timerStatus = profileRow.timer_status ?? 'idle'
+    const timerStartAt = profileRow.timer_start_at ?? null
+    const secondsToday = Number(profileRow.seconds_today ?? 0)
+    
+    if (timerStatus === 'idle') return 0
+    
+    if (timerStatus === 'paused') {
+      return secondsToday
+    }
+    
+    // Running: calculate elapsed since timer_start_at + accumulated seconds_today
+    if (timerStatus === 'running' && timerStartAt) {
+      const now = Date.now()
+      const startMs = new Date(timerStartAt).getTime()
+      const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
+      return secondsToday + currentSegmentSeconds
+    }
+    
+    return secondsToday
+  },
+
+  /**
    * Sync timer state from Supabase profile row (called by realtime subscription).
    * This ensures instant updates when timer is started/paused/stopped on another device.
    * Updates local pilots state with server-authoritative timer fields.
+   * CRITICAL: Calculates elapsed time immediately for cold-start sync.
    */
   syncTimerStateFromProfile: (profileRow) => {
     const pilotId = profileRow.id
@@ -1187,6 +1228,10 @@ export const useAppStore = create((set, get) => ({
       ? (pilot?.mode === 'good' ? 'good' : 'youtube')
       : (timerMode === 'game' ? 'game' : pilot?.mode ?? 'game')
     
+    // CRITICAL: Calculate elapsed time immediately for running timers
+    // This ensures Device B shows correct time (e.g., 05:43) on cold start
+    const calculatedElapsed = get().calculateElapsedFromProfile(profileRow)
+    
     // Update local state immediately (triggers UI re-render)
     set((s) => {
       const currentPilot = s.pilots?.[pilotId]
@@ -1204,6 +1249,8 @@ export const useAppStore = create((set, get) => ({
             timerStatus, // Server-authoritative timer status
             timerStartAt, // Server timestamp when current segment started
             secondsToday: secondsToday, // Accumulated seconds (excluding current run)
+            // Store calculated elapsed for immediate display (cold-start fix)
+            calculatedElapsedSeconds: calculatedElapsed,
           },
         },
       }
