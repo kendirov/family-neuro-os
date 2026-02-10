@@ -338,7 +338,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         aria-hidden
       />
       {/* Header: Pixel art avatar + name + Wallet (Quick Calculator) trigger */}
-      <div className="flex items-center gap-3 sm:gap-4 mb-3 shrink-0 relative z-10">
+          <div className="flex items-center justify-between gap-3 sm:gap-4 mb-3 shrink-0 relative z-10">
         <div className="relative shrink-0">
           <PilotAvatar
             pilotId={user.id}
@@ -358,7 +358,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
           )}
         </div>
         <div className="flex-1 min-w-0 relative z-10">
-          <h2 className="hud-player-name text-white font-black">
+          <h2 className="hud-player-name text-white font-black truncate max-w-[120px] sm:max-w-[160px]">
             {theme.name}
           </h2>
         </div>
@@ -1163,7 +1163,7 @@ export function Dashboard({ mode = 'pilot' }) {
               </button>
             )}
           </div>
-          {isCommander && (
+          {isCommander && false && (
             <GodModeCommandBar
               roma={roma}
               kirill={kirill}
