@@ -51,76 +51,45 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
   const resumeTimer = useAppStore((s) => s.resumeTimer)
   const stopTimer = useAppStore((s) => s.stopTimer)
   
-  // Calculate elapsed seconds from server-authoritative timer state
-  // IF timer_status === 'idle': Display 00:00
-  // IF timer_status === 'paused': Display seconds_today formatted
-  // IF timer_status === 'running': Display seconds_today + (NOW() - timer_start_at)
-  // CRITICAL: Always recalculate from server state, never rely on local counters
-  const calculateElapsedSeconds = (pilotState) => {
+  // CURRENT SESSION ONLY: Big timer shows "right now" — not daily total.
+  // - idle: 00:00
+  // - running: (now - timer_start_at)
+  // - paused: length of the segment that was just paused (pausedSegmentSeconds)
+  const calculateCurrentSessionSeconds = (pilotState) => {
     if (!pilotState || pilotState.timerStatus === 'idle') return 0
-    
-    const secondsToday = pilotState.secondsToday ?? 0
-    
+    if (pilotState.timerStatus === 'paused') {
+      return pilotState.sessionElapsed ?? pilotState.pausedSegmentSeconds ?? 0
+    }
     if (pilotState.timerStatus === 'running' && pilotState.timerStartAt) {
       const now = Date.now()
       const startMs = new Date(pilotState.timerStartAt).getTime()
-      const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
-      return secondsToday + currentSegmentSeconds
+      return Math.max(0, Math.floor((now - startMs) / 1000))
     }
-    
-    // Paused: just return seconds_today
-    return secondsToday
+    return 0
   }
-  
-  // CRITICAL: Use calculated elapsed from store if available (cold-start fix),
-  // otherwise calculate immediately from pilot state
-  const initialElapsed = pilot?.calculatedElapsedSeconds != null 
-    ? pilot.calculatedElapsedSeconds 
-    : calculateElapsedSeconds(pilot)
-  const [displayElapsedSeconds, setDisplayElapsedSeconds] = useState(initialElapsed)
-  
-  // Update display every second when timer is running (UI-only counter based on server timestamp)
-  // CRITICAL: Always recalculate from server state (NOW - timer_start_at), never use local counters
-  // This ensures Device B immediately shows correct time (e.g., 05:43) on cold start
+
+  const [displayElapsedSeconds, setDisplayElapsedSeconds] = useState(() =>
+    calculateCurrentSessionSeconds(pilot)
+  )
+
+  // Keep display in sync: current session only (reset to 00:00 when stopped)
   useEffect(() => {
-    // Если пилот отсутствует — показываем 0
     if (!pilot) {
       setDisplayElapsedSeconds(0)
       return
     }
-
-    // При паузе жёстко привязываемся к накопленным секундам в сторе,
-    // чтобы никакие сетевые лаги не сбивали отображение.
-    if (pilot.timerStatus === 'paused') {
-      setDisplayElapsedSeconds(pilot.secondsToday ?? 0)
-      return
-    }
-
-    // CRITICAL: Always recalculate from server state immediately
-    // This fixes cold-start: Device B jumps to correct time instantly
-    const currentElapsed = calculateElapsedSeconds(pilot)
-    setDisplayElapsedSeconds(currentElapsed)
-    
-    // Интервал нужен только в состоянии running
-    if (pilot.timerStatus !== 'running') {
-      return
-    }
-    
-    // Set up ticker: update display every second
-    // CRITICAL: Always recalculate from server state (Date.now() - timerStartAt)
-    // Never rely on local counters - this ensures correct time even after page refresh
+    const current = calculateCurrentSessionSeconds(pilot)
+    setDisplayElapsedSeconds(current)
+    if (pilot.timerStatus !== 'running') return
     const interval = setInterval(() => {
-      const currentPilot = useAppStore.getState().pilots?.[id]
-      if (currentPilot && currentPilot.timerStatus === 'running') {
-        // Always recalculate: NOW - timerStartAt + secondsToday
-        const elapsed = calculateElapsedSeconds(currentPilot)
-        setDisplayElapsedSeconds(elapsed)
+      const p = useAppStore.getState().pilots?.[id]
+      if (p?.timerStatus === 'running') {
+        setDisplayElapsedSeconds(calculateCurrentSessionSeconds(p))
       }
     }, 1000)
-
     return () => clearInterval(interval)
-  }, [pilot?.timerStatus, pilot?.timerStartAt, pilot?.secondsToday, pilot?.calculatedElapsedSeconds, id])
-  
+  }, [pilot?.timerStatus, pilot?.timerStartAt, pilot?.sessionElapsed, pilot?.pausedSegmentSeconds, id])
+
   const elapsedSeconds = displayElapsedSeconds
 
   const config = PILOT_CONFIG[id] ?? PILOT_CONFIG.roma

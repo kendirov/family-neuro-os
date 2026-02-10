@@ -36,6 +36,10 @@ const initialPilotState = () => ({
   timerStatus: 'idle',
   timerStartAt: null,
   secondsToday: 0,
+  /** When paused: saved session length in seconds (true pause — resume from same second). */
+  sessionElapsed: 0,
+  /** When paused: length in seconds of the segment that was just paused (for "current session" display only). */
+  pausedSegmentSeconds: null,
 })
 
 /** Map DB profile row to store user shape. */
@@ -85,6 +89,12 @@ function calculateBurnRate(mode, todayGameTime, todayMediaTime) {
     if (todayGameTime < 60) return 1
     return 2
   }
+}
+
+/** Pay-as-you-go: cost in XP for a session segment. Rate: 1 XP per minute (default). */
+function calculateSessionCost(seconds, mode) {
+  const rate = 1
+  return Math.floor(seconds / 60) * rate
 }
 
 export const useAppStore = create((set, get) => ({
@@ -511,51 +521,63 @@ export const useAppStore = create((set, get) => ({
 
   startTimer: async (pilotId, mode = 'game') => {
     const state = get()
+    const pilot = state.pilots?.[pilotId]
     const user = state.users.find((u) => u.id === pilotId)
     const balanceAtStart = user ? Math.max(0, user.balance) : 0
-    const previousSecondsToday = state.pilots?.[pilotId]?.secondsToday ?? 0
-    const now = new Date().toISOString()
+    const previousSecondsToday = pilot?.secondsToday ?? 0
     const m = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
-    // Map mode to timer_mode: 'game' or 'cartoon' (youtube/good are cartoons)
     const timerMode = m === 'game' ? 'game' : 'cartoon'
-    
+
+    // Scenario A: Resuming from paused — backdate start so elapsed is correct
+    // Scenario B: Fresh start from idle
+    const isResuming = pilot?.timerStatus === 'paused'
+    let timerStartAtIso
+
+    if (isResuming) {
+      const savedSeconds = pilot?.sessionElapsed ?? 0
+      const newStartTime = new Date(Date.now() - savedSeconds * 1000)
+      timerStartAtIso = newStartTime.toISOString()
+    } else {
+      timerStartAtIso = new Date().toISOString()
+    }
+
     try {
-      // CRITICAL: Update Supabase FIRST (server is source of truth)
       await supabase
         .from('profiles')
         .update({
           timer_status: 'running',
           timer_mode: timerMode,
-          timer_start_at: now,
-          // Preserve seconds_today (don't reset on start)
+          timer_start_at: timerStartAtIso,
+          session_elapsed: 0,
         })
         .eq('id', pilotId)
-      
-      // After DB update succeeds, update local state
+
       set((s) => ({
         pilots: {
           ...s.pilots,
           [pilotId]: {
+            ...(s.pilots[pilotId] ?? initialPilotState()),
             status: 'RUNNING',
             sessionMinutes: 0,
             burnerActive: true,
             mode: m,
-            sessionStartAt: now,
-            lastBurnAt: now,
+            sessionStartAt: timerStartAtIso,
+            lastBurnAt: timerStartAtIso,
             sessionBalanceAtStart: balanceAtStart,
-            activeSessionId: null,
-            sessionTotalBurned: 0,
+            activeSessionId: s.pilots?.[pilotId]?.activeSessionId ?? null,
+            sessionTotalBurned: s.pilots?.[pilotId]?.sessionTotalBurned ?? 0,
             timerStatus: 'running',
-            timerStartAt: now,
-            // Preserve any accumulated seconds so UI never flashes to 0.
+            timerStartAt: timerStartAtIso,
             secondsToday: previousSecondsToday,
+            sessionElapsed: 0,
+            pausedSegmentSeconds: null,
           },
         },
       }))
-      get().createSessionTransaction(pilotId, m)
+      if (!isResuming) get().createSessionTransaction(pilotId, m)
     } catch (e) {
       console.error('startTimer sync:', e)
-      throw e // Re-throw so caller can handle error
+      throw e
     }
   },
 
@@ -564,20 +586,49 @@ export const useAppStore = create((set, get) => ({
     get().startTimer(pilotId, mode)
   },
 
-  pauseTimer: (pilotId) => {
+  pauseTimer: async (pilotId) => {
     const state = get()
     const pilot = state.pilots?.[pilotId]
-    if (!pilot || pilot.status !== 'RUNNING') return
-    
-    // STEP 1: локально считаем дельту и немедленно обновляем стор (оптимистично)
-    const now = Date.now()
-    let elapsedSeconds = 0
-    if (pilot.timerStartAt) {
-      const startMs = new Date(pilot.timerStartAt).getTime()
-      elapsedSeconds = Math.max(0, Math.floor((now - startMs) / 1000))
+    if (!pilot || pilot.timerStatus !== 'running') return
+
+    // True Pause: freeze time, do NOT deduct balance
+    const elapsedNow = (new Date() - new Date(pilot.timerStartAt)) / 1000
+    const sessionElapsedSaved = Math.max(0, Math.floor(elapsedNow))
+
+    const payload = {
+      timer_status: 'paused',
+      timer_start_at: null,
+      session_elapsed: sessionElapsedSaved,
     }
-    const baseSeconds = pilot.secondsToday ?? 0
-    const newSecondsToday = baseSeconds + elapsedSeconds
+
+    let dbOk = false
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(payload)
+        .eq('id', pilotId)
+        .select('id')
+        .maybeSingle()
+
+      if (error) {
+        console.error('pauseTimer DB error:', error)
+        set({ lastOfflineSyncToast: { message: 'Пауза не сохранилась на сервере. Проверьте консоль (F12).' } })
+        return
+      }
+      if (!data) {
+        console.error('pauseTimer: update affected 0 rows')
+        set({ lastOfflineSyncToast: { message: 'Пауза не сохранилась на сервере (0 строк обновлено).' } })
+        return
+      }
+      dbOk = true
+      console.log('[PauseTimer] Saved session_elapsed:', sessionElapsedSaved)
+    } catch (e) {
+      console.error('pauseTimer sync:', e)
+      set({ lastOfflineSyncToast: { message: 'Пауза не сохранилась на сервере.' } })
+      return
+    }
+
+    if (!dbOk) return
 
     set((s) => ({
       pilots: {
@@ -588,26 +639,11 @@ export const useAppStore = create((set, get) => ({
           burnerActive: false,
           timerStatus: 'paused',
           timerStartAt: null,
-          secondsToday: newSecondsToday,
+          sessionElapsed: sessionElapsedSaved,
+          pausedSegmentSeconds: sessionElapsedSaved,
         },
       },
     }))
-
-    // STEP 2: асинхронно синхронизируемся с Supabase
-    ;(async () => {
-      try {
-        await supabase
-          .from('profiles')
-          .update({
-            timer_status: 'paused',
-            seconds_today: newSecondsToday,
-            timer_start_at: null,
-          })
-          .eq('id', pilotId)
-      } catch (e) {
-        console.error('pauseTimer sync:', e)
-      }
-    })()
   },
 
   // Legacy alias for backward compatibility
@@ -616,58 +652,9 @@ export const useAppStore = create((set, get) => ({
   },
 
   resumeTimer: (pilotId) => {
-    const state = get()
-    const pilot = state.pilots?.[pilotId]
-    if (!pilot || pilot.status !== 'PAUSED') return
-    
-    const now = new Date().toISOString()
-    
-    // CRITICAL: Update DB first
-    ;(async () => {
-      try {
-        // Get timer_mode + seconds_today from DB, но секунды берём максимумом:
-        // локальное (store) значение важнее, если оно больше (мы уже могли посчитать паузу).
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('timer_mode, seconds_today')
-          .eq('id', pilotId)
-          .single()
-        
-        const timerMode = profile?.timer_mode ?? 'game'
-        const dbSecondsToday = Number(profile?.seconds_today ?? 0)
-        const localSecondsToday = pilot.secondsToday ?? 0
-        const secondsToday = Math.max(localSecondsToday, dbSecondsToday)
-        
-        // Update DB: status='running', timer_start_at=NOW(), seconds_today = max(local, db)
-        await supabase
-          .from('profiles')
-          .update({
-            timer_status: 'running',
-            timer_start_at: now,
-            timer_mode: timerMode,
-            seconds_today: secondsToday,
-          })
-          .eq('id', pilotId)
-        
-        // Update local state after DB update
-        set((state) => ({
-          pilots: {
-            ...state.pilots,
-            [pilotId]: { 
-              ...state.pilots[pilotId], 
-              status: 'RUNNING', 
-              burnerActive: true,
-              sessionStartAt: now,
-              timerStatus: 'running',
-              timerStartAt: now,
-              secondsToday: secondsToday,
-            },
-          },
-        }))
-      } catch (e) {
-        console.error('resumeTimer sync:', e)
-      }
-    })()
+    const pilot = get().pilots?.[pilotId]
+    if (!pilot || pilot.timerStatus !== 'paused') return
+    get().startTimer(pilotId, pilot.mode ?? 'game')
   },
 
   // Legacy alias for backward compatibility
@@ -675,68 +662,77 @@ export const useAppStore = create((set, get) => ({
     get().resumeTimer(pilotId)
   },
 
-  stopTimer: (pilotId) => {
+  stopTimer: async (pilotId) => {
     const state = get()
     const pilot = state.pilots?.[pilotId]
-    if (!pilot || pilot.status === 'IDLE') return
-    
-    // CRITICAL: Calculate elapsed from server state, then update DB and trigger burn
-    ;(async () => {
-      try {
-        // Get current timer state from DB (source of truth)
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('seconds_today, timer_status, timer_start_at, timer_mode')
-          .eq('id', pilotId)
-          .single()
-        
-        const currentSecondsToday = Number(profile?.seconds_today ?? 0)
-        let finalSecondsToday = currentSecondsToday
-        let elapsedSeconds = 0
-        
-        // Calculate elapsed if timer was running (not already paused)
-        if (profile?.timer_status === 'running' && profile?.timer_start_at) {
-          const now = new Date()
-          const timerStartAt = new Date(profile.timer_start_at)
-          elapsedSeconds = Math.floor((now.getTime() - timerStartAt.getTime()) / 1000)
-          finalSecondsToday = currentSecondsToday + elapsedSeconds
-        }
-        
-        const timerMode = profile?.timer_mode ?? 'game'
-        const totalMinutes = Math.floor(finalSecondsToday / 60)
-        
-        // Update DB: status='idle', timer_start_at=null, seconds_today=total
-        await supabase
-          .from('profiles')
-          .update({ 
-            timer_status: 'idle',
-            timer_mode: null,
-            timer_start_at: null,
-            seconds_today: finalSecondsToday,
-            session_start_at: null, 
-            last_burn_at: null, 
-            session_mode: null, 
-            session_balance_at_start: null 
-          })
-          .eq('id', pilotId)
-        
-        // Finalize session transaction (per-minute burns already happened during session)
-        get().finalizeSessionTransaction(pilotId)
-        
-        // Note: Burn transactions are handled per-minute during the session via updateSessionBurn
-        // This stopTimer just clears the timer state and finalizes the session
-        
-        // Update local state after DB update
-        set((state) => ({
-          pilots: {
-            ...state.pilots,
-            [pilotId]: initialPilotState(),
-          },
-        }))
-      } catch (e) {
-        console.error('stopTimer sync:', e)
-      }
-    })()
+    if (!pilot || pilot.timerStatus === 'idle') return
+
+    console.log('[StopTimer] Starting sequence for:', pilotId)
+
+    // Total session time: running → (now - start); paused → session_elapsed
+    let totalSeconds = 0
+    if (pilot.timerStatus === 'running' && pilot.timerStartAt) {
+      const start = new Date(pilot.timerStartAt)
+      totalSeconds = Math.max(0, Math.floor((Date.now() - start) / 1000))
+    } else if (pilot.timerStatus === 'paused') {
+      totalSeconds = pilot.sessionElapsed ?? 0
+    }
+    const minutes = Math.floor(totalSeconds / 60)
+    const cost = Math.max(0, minutes * 1)
+    const currentBalance = state.users.find((u) => u.id === pilotId)?.balance ?? 0
+    const newBalance = currentBalance - cost
+    const baseSeconds = pilot.secondsToday ?? 0
+    const newSecondsToday = baseSeconds + totalSeconds
+
+    console.log(`[StopTimer] Total: ${totalSeconds}s, Cost: ${cost} XP, New balance: ${newBalance}`)
+
+    // ——— Step B (optimistic): Update UI immediately ———
+    set((s) => ({
+      pilots: {
+        ...s.pilots,
+        [pilotId]: initialPilotState(),
+      },
+      users: s.users.map((u) => (u.id === pilotId ? { ...u, balance: newBalance } : u)),
+    }))
+
+    // ——— Step C: Database — STOP: clear timer and session_elapsed, deduct balance ———
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        timer_status: 'idle',
+        timer_start_at: null,
+        session_elapsed: 0,
+        seconds_today: newSecondsToday,
+        balance: newBalance,
+      })
+      .eq('id', pilotId)
+
+    if (profileError) {
+      console.error('[StopTimer] ❌ PROFILE UPDATE FAILED:', profileError)
+      set({ lastOfflineSyncToast: { message: `Ошибка сохранения: ${profileError.message}` } })
+      // Revert local state so UI matches server (no zombie “stopped”)
+      set((s) => ({
+        pilots: { ...s.pilots, [pilotId]: pilot },
+        users: s.users.map((u) => (u.id === pilotId ? { ...u, balance: currentBalance } : u)),
+      }))
+      return
+    }
+    console.log('[StopTimer] ✅ Profile updated successfully')
+
+    // ——— Step D: Transaction insert (text id to prevent 400 with rebuilt transactions table) ———
+    if (cost > 0) {
+      const txId = Date.now().toString()
+      const { error: transError } = await supabase.from('transactions').insert({
+        id: txId,
+        user_id: String(pilotId),
+        amount: -cost,
+        type: 'expense',
+        description: `Сессия: ${pilot.mode ?? 'game'} (${minutes} мин)`,
+      })
+      if (transError) console.error('[StopTimer] ⚠️ Transaction failed (non-critical):', transError)
+    }
+
+    get().finalizeSessionTransaction(pilotId)
   },
 
   // Legacy alias for backward compatibility
@@ -968,6 +964,7 @@ export const useAppStore = create((set, get) => ({
         const timerMode = row.timer_mode ?? null
         const timerStartAt = row.timer_start_at ?? null
         const secondsToday = Number(row.seconds_today ?? 0)
+        const sessionElapsed = Number(row.session_elapsed ?? 0)
         
         const sessionStartAt = row.session_start_at ?? null
         const lastBurnAt = row.last_burn_at ?? null
@@ -1037,17 +1034,14 @@ export const useAppStore = create((set, get) => ({
           : timerStatus === 'paused' ? 'PAUSED' 
           : 'IDLE'
         
-        // CRITICAL: Calculate elapsed time immediately for running timers (cold-start fix)
-        // Note: effectiveStartAt already declared above
-        // This ensures Device B shows correct time immediately on page load
+        // Current-session elapsed: running → (now - start); paused → session_elapsed
         let calculatedElapsed = 0
         if (timerStatus === 'running' && timerStartAt) {
           const now = Date.now()
           const startMs = new Date(timerStartAt).getTime()
-          const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
-          calculatedElapsed = secondsToday + currentSegmentSeconds
+          calculatedElapsed = Math.max(0, Math.floor((now - startMs) / 1000))
         } else if (timerStatus === 'paused') {
-          calculatedElapsed = secondsToday
+          calculatedElapsed = sessionElapsed
         }
         
         set((s) => ({
@@ -1063,11 +1057,10 @@ export const useAppStore = create((set, get) => ({
               sessionBalanceAtStart: balanceAtStart,
               activeSessionId,
               sessionTotalBurned,
-              // Store server timer state for UI calculation
               timerStatus,
               timerStartAt,
               secondsToday: secondsToday,
-              // Store calculated elapsed for immediate display (cold-start fix)
+              sessionElapsed,
               calculatedElapsedSeconds: calculatedElapsed,
             },
           },
@@ -1187,23 +1180,16 @@ export const useAppStore = create((set, get) => ({
   calculateElapsedFromProfile: (profileRow) => {
     const timerStatus = profileRow.timer_status ?? 'idle'
     const timerStartAt = profileRow.timer_start_at ?? null
-    const secondsToday = Number(profileRow.seconds_today ?? 0)
+    const sessionElapsed = Number(profileRow.session_elapsed ?? 0)
     
     if (timerStatus === 'idle') return 0
-    
-    if (timerStatus === 'paused') {
-      return secondsToday
-    }
-    
-    // Running: calculate elapsed since timer_start_at + accumulated seconds_today
+    if (timerStatus === 'paused') return sessionElapsed
     if (timerStatus === 'running' && timerStartAt) {
       const now = Date.now()
       const startMs = new Date(timerStartAt).getTime()
-      const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
-      return secondsToday + currentSegmentSeconds
+      return Math.max(0, Math.floor((now - startMs) / 1000))
     }
-    
-    return secondsToday
+    return 0
   },
 
   /**
@@ -1221,6 +1207,7 @@ export const useAppStore = create((set, get) => ({
     const timerMode = profileRow.timer_mode ?? null
     const timerStartAt = profileRow.timer_start_at ?? null
     const secondsToday = Number(profileRow.seconds_today ?? 0)
+    const sessionElapsed = Number(profileRow.session_elapsed ?? 0)
     
     const state = get()
     const pilot = state.pilots?.[pilotId]
@@ -1257,10 +1244,10 @@ export const useAppStore = create((set, get) => ({
             mode: pilotStatus !== 'IDLE' ? sessionMode : (currentPilot?.mode ?? null),
             sessionStartAt: timerStartAt ?? currentPilot?.sessionStartAt ?? null,
             sessionMinutes, // Update session minutes from calculated elapsed
-            timerStatus, // Server-authoritative timer status
-            timerStartAt, // Server timestamp when current segment started
-            secondsToday: secondsToday, // Accumulated seconds (excluding current run)
-            // Store calculated elapsed for immediate display (cold-start fix)
+            timerStatus,
+            timerStartAt,
+            secondsToday: secondsToday,
+            sessionElapsed,
             calculatedElapsedSeconds: calculatedElapsed,
           },
         },
