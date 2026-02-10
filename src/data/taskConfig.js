@@ -56,11 +56,56 @@ export const TASK_CONFIG = {
     foodComposite: [
       {
         main: { id: 'breakfast', emoji: '🍳', label: 'Завтрак', credits: 20, reason: 'Питание: Завтрак' },
-        modifiers: [],
+        // Бонусы привязаны к конкретному приёму пищи
+        modifiers: [
+          {
+            id: 'breakfast_all',
+            emoji: '🍽️',
+            label: 'Съел всё',
+            credits: 10,
+            reason: 'Питание: Завтрак — съел всё',
+          },
+          {
+            id: 'breakfast_ontime',
+            emoji: '⏱',
+            label: 'Вовремя',
+            credits: 5,
+            reason: 'Питание: Завтрак — вовремя',
+          },
+          {
+            id: 'breakfast_dishes',
+            emoji: '🧽',
+            label: 'Посуда',
+            credits: 10,
+            reason: 'Питание: Завтрак — посуда',
+          },
+        ],
       },
       {
         main: { id: 'lunch', emoji: '🍔', label: 'Обед', credits: 20, reason: 'Питание: Обед' },
-        modifiers: [],
+        modifiers: [
+          {
+            id: 'lunch_all',
+            emoji: '🍽️',
+            label: 'Съел всё',
+            credits: 10,
+            reason: 'Питание: Обед — съел всё',
+          },
+          {
+            id: 'lunch_ontime',
+            emoji: '⏱',
+            label: 'Вовремя',
+            credits: 5,
+            reason: 'Питание: Обед — вовремя',
+          },
+          {
+            id: 'lunch_dishes',
+            emoji: '🧽',
+            label: 'Посуда',
+            credits: 10,
+            reason: 'Питание: Обед — посуда',
+          },
+        ],
       },
       {
         main: { id: 'snack', emoji: '🍪', label: 'Полдник', credits: 10, reason: 'Питание: Полдник' },
@@ -68,14 +113,30 @@ export const TASK_CONFIG = {
       },
       {
         main: { id: 'dinner', emoji: '🍲', label: 'Ужин', credits: 20, reason: 'Питание: Ужин' },
-        modifiers: [],
+        modifiers: [
+          {
+            id: 'dinner_all',
+            emoji: '🍽️',
+            label: 'Съел всё',
+            credits: 10,
+            reason: 'Питание: Ужин — съел всё',
+          },
+          {
+            id: 'dinner_ontime',
+            emoji: '⏱',
+            label: 'Вовремя',
+            credits: 5,
+            reason: 'Питание: Ужин — вовремя',
+          },
+          {
+            id: 'dinner_dishes',
+            emoji: '🧽',
+            label: 'Посуда',
+            credits: 10,
+            reason: 'Питание: Ужин — посуда',
+          },
+        ],
       },
-    ],
-    // Universal nutrition bonuses (small buttons, apply to any meal)
-    bonus: [
-      { id: 'food_all', emoji: '🍽️', label: 'Съел всё', credits: 10, reason: 'Питание: Съел всё' },
-      { id: 'food_ontime', emoji: '⏱', label: 'Вовремя', credits: 5, reason: 'Питание: Вовремя' },
-      { id: 'food_dishes', emoji: '🧽', label: 'Посуда', credits: 10, reason: 'Питание: Посуда' },
     ],
   },
 
@@ -95,6 +156,7 @@ export const TASK_CONFIG = {
 export const PENALTY_BOX = [
   { id: 'shout_meltdown', emoji: '🗯️', label: 'Крик/Истерика', credits: -50, reason: 'Штраф: Крик/Истерика' },
   { id: 'mess_room', emoji: '💥', label: 'Бардак', credits: -20, reason: 'Штраф: Бардак' },
+  { id: 'fight', emoji: '🥊', label: 'Драка', credits: -70, reason: 'Штраф: Драка' },
 ]
 
 /**

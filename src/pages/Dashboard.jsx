@@ -437,9 +437,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
                 (g) => g.main.id === taskId || (g.modifiers ?? []).some((m) => m.id === taskId)
               ) ||
               // School routine tasks (daily): school_leave, pack_bag
-              (taskId === 'school_leave' || taskId === 'pack_bag') ||
-              // Nutrition bonus tasks (daily): food_all, food_ontime, food_dishes
-              (taskId === 'food_all' || taskId === 'food_ontime' || taskId === 'food_dishes')
+              (taskId === 'school_leave' || taskId === 'pack_bag')
             if (!isDaily) return 'pending'
             return isDailyBaseComplete(user.id, taskId) ? 'completed' : 'pending'
           }}

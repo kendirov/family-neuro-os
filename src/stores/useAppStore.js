@@ -904,48 +904,18 @@ export const useAppStore = create((set, get) => ({
         localStorage.setItem(RAID_STORAGE_KEY, String(raidProgress))
       }
 
-      // Load today's time tracking from profiles
-      const today = getDateKey()
-      const lastActive = get().lastActiveDate
+      // Load today's time tracking from profiles.
+      // ВАЖНО: не пытаемся здесь определять «новый день» и ничего не сбрасываем в БД.
+      // За смену дня отвечает checkDailyReset (использует localStorage и отдельную логику).
       const todayTimeTracking = {}
-      
-      // If it's a new day, reset time tracking
-      if (lastActive !== today) {
-        profiles.forEach((profile) => {
-          if (PILOT_IDS.includes(profile.id)) {
-            todayTimeTracking[profile.id] = { game: 0, media: 0 }
+      profiles.forEach((profile) => {
+        if (PILOT_IDS.includes(profile.id)) {
+          todayTimeTracking[profile.id] = {
+            game: Number(profile.today_game_time ?? 0),
+            media: Number(profile.today_media_time ?? 0),
           }
-        })
-        // Reset in database
-        try {
-          await Promise.all(
-            PILOT_IDS.map((id) =>
-              supabase
-                .from('profiles')
-                .update({ 
-                  today_game_time: 0, 
-                  today_media_time: 0,
-                  seconds_today: 0,
-                  timer_status: 'idle',
-                  timer_mode: null,
-                  timer_start_at: null,
-                })
-                .eq('id', id)
-            )
-          )
-        } catch (e) {
-          console.warn('fetchState: failed to reset time tracking for new day', e)
         }
-      } else {
-        profiles.forEach((profile) => {
-          if (PILOT_IDS.includes(profile.id)) {
-            todayTimeTracking[profile.id] = {
-              game: Number(profile.today_game_time ?? 0),
-              media: Number(profile.today_media_time ?? 0),
-            }
-          }
-        })
-      }
+      })
 
       set({ users, transactions, raidProgress, todayTimeTracking, isLoading: false })
 

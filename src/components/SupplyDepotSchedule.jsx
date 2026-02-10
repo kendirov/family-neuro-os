@@ -352,7 +352,6 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
   const school = TASK_CONFIG.SCHOOL_INTELLECT.tasks || []
   const grades = school.filter((t) => t.id.startsWith('grade_'))
   const foodComposite = TASK_CONFIG.NUTRITION.foodComposite || []
-  const foodBonus = TASK_CONFIG.NUTRITION.bonus || []
   const base = TASK_CONFIG.BASE_MAINTENANCE.tasks || []
   const handleUndo = (task) => userId && onUndoDailyTask?.(userId, task)
 
@@ -507,7 +506,7 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
         )}
       </TaskGroup>
 
-      {/* Block 2: ПИТАНИЕ — main meals row + bonus buttons */}
+      {/* Block 2: ПИТАНИЕ — основные приёмы пищи + индивидуальные бонусы */}
       <TaskGroup
         title="ПИТАНИЕ"
         titleColor="text-yellow-400"
@@ -515,12 +514,11 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
         bodyClass="pt-2 space-y-3"
         className="bg-slate-800/70 border-amber-500/60"
       >
-        {/* Meal Rows: Завтрак / Обед / Ужин */}
+        {/* Meal Rows: Завтрак / Обед / Ужин (с собственными бонусами) */}
         {nutritionMainMeals.map((row) => {
           const main = normalizeTask(row.main, true)
           return (
-            <div key={main.id} className="mb-3 space-y-2">
-              {/* Row 1: Main Meal Button (Full Width) */}
+            <div key={main.id} className="mb-3">
               <FoodRow
                 main={row.main}
                 modifiers={row.modifiers ?? []}
@@ -530,29 +528,6 @@ export function SupplyDepotSchedule({ getStatus, onTaskComplete, disabled, accen
                 onUndo={handleUndo}
                 isGodMode={isGodMode}
               />
-              {/* Row 2: Bonus tags container (below main meal) */}
-              {foodBonus.length > 0 && (
-                <div className="flex gap-1 justify-center">
-                  {foodBonus.map((bonus) => {
-                    const bonusTask = normalizeTask(bonus, true)
-                    return (
-                      <TaskButton
-                        key={`${bonusTask.id}-${main.id}`}
-                        task={bonusTask}
-                        status={getStatus(bonusTask.id)}
-                        onComplete={onTaskComplete}
-                        disabled={disabled}
-                        accentColor={accentColor}
-                        variant="base"
-                        isDaily={true}
-                        onUndo={handleUndo}
-                        isGodMode={isGodMode}
-                        size="small"
-                      />
-                    )
-                  })}
-                </div>
-              )}
             </div>
           )
         })}
