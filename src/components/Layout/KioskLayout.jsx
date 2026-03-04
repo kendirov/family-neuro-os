@@ -26,7 +26,7 @@ export function KioskLayout({ children, className = '' }) {
         className="pointer-events-none absolute inset-0 opacity-[0.03] bg-[linear-gradient(rgba(34,211,238,.15)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,.15)_1px,transparent_1px)] bg-[size:24px_24px]"
         aria-hidden
       />
-      <div className="relative flex flex-col min-h-screen font-sans-data">
+      <div className="relative flex flex-col min-h-screen font-sans-data pt-[5.5rem]">
         {children}
       </div>
     </div>

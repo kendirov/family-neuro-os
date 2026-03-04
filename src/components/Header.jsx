@@ -63,10 +63,13 @@ export function Header() {
   const kirill = users?.find((u) => u.id === 'kirill')
 
   return (
-    <header className="command-bridge shrink-0" role="banner">
-      <div className="command-bridge-glass flex w-full items-center gap-4 px-3 py-2.5 md:px-4 md:py-3">
-        {/* Left: Week Strip — fixed Mon–Sun */}
-        <div className="week-strip flex shrink-0 items-center gap-0.5 rounded-xl border border-slate-600/50 bg-slate-900/60 px-1.5 py-1.5">
+    <header
+      className="fixed top-0 left-0 right-0 z-50 mx-4 mt-3 md:mx-6 md:mt-4 md:max-w-[1920px] md:left-1/2 md:right-auto md:-translate-x-1/2"
+      role="banner"
+    >
+      <div className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)] md:px-4 md:py-3">
+        {/* Left: Week Strip — Mon–Sun */}
+        <div className="week-strip flex shrink-0 items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 px-1.5 py-1.5 backdrop-blur-md">
           {DAY_ORDER.map((d) => {
             const isWeekend = d === 0 || d === 6
             const isActive = d === dayIndex
@@ -87,18 +90,20 @@ export function Header() {
           })}
         </div>
 
-        {/* Center: Total XP summary — mini-badges */}
+        {/* Center: Turbo Coins — mini-badges */}
         <div className="xp-summary flex flex-1 justify-center gap-2 sm:gap-3">
           {roma != null && (
-            <span className="xp-badge flex items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-cyan-300 sm:text-xs">
+            <span className="xp-badge flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-cyan-300 backdrop-blur-sm sm:text-xs">
               <span className="uppercase tracking-wider text-cyan-400/90">Рома</span>
-              <span className="font-lcd">{roma.balance ?? 0}</span>
+              <span className="font-turbo-nums">{roma.balance ?? 0}</span>
+              <span className="text-amber-400/90">⚡</span>
             </span>
           )}
           {kirill != null && (
-            <span className="xp-badge flex items-center gap-1.5 rounded-lg border border-purple-500/50 bg-purple-500/15 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-purple-300 sm:text-xs">
+            <span className="xp-badge flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-purple-300 backdrop-blur-sm sm:text-xs">
               <span className="uppercase tracking-wider text-purple-400/90">Кирилл</span>
-              <span className="font-lcd">{kirill.balance ?? 0}</span>
+              <span className="font-turbo-nums">{kirill.balance ?? 0}</span>
+              <span className="text-amber-400/90">⚡</span>
             </span>
           )}
         </div>
@@ -106,14 +111,14 @@ export function Header() {
         {/* Right: Clock, Date, Status, Lock */}
         <div className="status-bar flex shrink-0 items-center gap-2 md:gap-3">
           <span
-            className="status-label hidden rounded border border-slate-600/60 bg-slate-800/60 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400 sm:inline"
+            className="status-label hidden rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400 backdrop-blur-sm sm:inline"
             title={weekend ? 'Выходной — без лимита' : 'Будни — лимит 1 ч'}
           >
             {statusLabel}
           </span>
           <time
             dateTime={now.toISOString()}
-            className="command-bridge-clock font-lcd text-lg font-bold tabular-nums text-cyan-300/95 sm:text-xl"
+            className="command-bridge-clock font-turbo-nums text-lg font-bold text-cyan-300/95 sm:text-xl"
           >
             {formatTimeHHMM(now)}
           </time>
@@ -122,7 +127,7 @@ export function Header() {
           </span>
           <button
             type="button"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-2 border-slate-600/80 bg-slate-800/80 text-slate-300 transition hover:border-slate-500 hover:text-slate-100 touch-manipulation select-none icon-pop"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-300 backdrop-blur-sm transition hover:border-white/20 hover:text-slate-100 touch-manipulation select-none"
             aria-label={panelLocked ? 'Панель заблокирована — долгое нажатие для разблокировки' : 'Панель разблокирована — долгое нажатие для блокировки'}
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}

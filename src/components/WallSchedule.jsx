@@ -32,21 +32,18 @@ const MAX_ROWS = 5
 
 function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
   const isPurple = accent === 'purple'
-  const headerBg = isPurple ? 'bg-purple-600/30' : 'bg-cyan-600/30'
-  const headerBorder = isPurple ? 'border-purple-500/50' : 'border-cyan-500/50'
   const headerText = isPurple ? 'text-purple-200' : 'text-cyan-200'
 
   return (
     <div
       className={cn(
-        'rounded-xl border-2 overflow-hidden flex flex-col min-w-0 bg-slate-950',
-        isPurple ? 'border-purple-500/40' : 'border-cyan-500/40'
+        'rounded-xl border overflow-hidden flex flex-col min-w-0 bg-white/5 backdrop-blur-xl border-white/10',
+        isPurple ? 'shadow-[0_0_0_1px_rgba(168,85,247,0.2)]' : 'shadow-[0_0_0_1px_rgba(34,211,238,0.2)]'
       )}
     >
       <h3
         className={cn(
-          'font-mono text-xs font-bold uppercase tracking-widest px-3 py-2 border-b border-slate-600/60',
-          headerBg,
+          'font-mono text-xs font-bold uppercase tracking-widest px-3 py-2 border-b border-white/10 bg-white/5',
           headerText
         )}
       >
@@ -64,12 +61,12 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
               >
                 <div
                   className={cn(
-                    'rounded-md px-2 py-1.5 font-mono text-sm font-bold uppercase tracking-wide text-center border border-slate-600/60',
+                    'rounded-md px-2 py-1.5 font-mono text-sm font-bold uppercase tracking-wide text-center border border-white/10',
                     isToday
                       ? isPurple
-                        ? 'bg-purple-500/40 text-purple-50 border-purple-400/70'
-                        : 'bg-cyan-500/40 text-cyan-50 border-cyan-400/70'
-                      : 'bg-slate-800/80 text-blue-400'
+                        ? 'bg-purple-500/20 text-purple-50 border-purple-400/50'
+                        : 'bg-cyan-500/20 text-cyan-50 border-cyan-400/50'
+                      : 'bg-white/5 text-slate-400'
                   )}
                 >
                   {DAY_LABELS[index]}
@@ -79,15 +76,15 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
                     <div
                       key={`${dayNum}-${i}`}
                       className={cn(
-                        'rounded-md border border-slate-700/60 px-2 py-1 font-mono text-xs leading-tight text-white break-words tracking-wide',
-                        i % 2 === 0 ? 'bg-slate-900/50' : 'bg-slate-950'
+                        'rounded-md border border-white/10 px-2 py-1 font-mono text-xs leading-tight text-white break-words tracking-wide',
+                        i % 2 === 0 ? 'bg-white/5' : 'bg-white/[0.03]'
                       )}
                     >
                       {lesson}
                     </div>
                   ))}
                   {lessons.length === 0 && (
-                    <div className="rounded-md bg-slate-900/60 border border-dashed border-slate-700/60 px-2 py-1 font-mono text-xs text-slate-500 text-center">
+                    <div className="rounded-md bg-white/5 border border-dashed border-white/10 px-2 py-1 font-mono text-xs text-slate-500 text-center">
                       —
                     </div>
                   )}
@@ -114,7 +111,7 @@ export function WallSchedule() {
 
   return (
     <section
-      className="wall-schedule shrink-0 w-full rounded-xl bg-slate-950 border border-slate-700/60 px-4 py-4 overflow-x-auto"
+      className="wall-schedule shrink-0 w-full rounded-xl border border-white/10 bg-white/5 backdrop-blur-xl px-4 py-4 overflow-x-auto shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)]"
       aria-label="Расписание на неделю"
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-6xl mx-auto">

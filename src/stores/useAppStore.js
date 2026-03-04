@@ -44,11 +44,31 @@ const initialPilotState = () => ({
 
 /** Map DB profile row to store user shape. */
 function profileToUser(row) {
+  const today = getDateKey()
+  const lastSpin = row.last_spin_date ? String(row.last_spin_date).slice(0, 10) : null
+  const lastReset = row.last_daily_reset ? String(row.last_daily_reset).slice(0, 10) : null
+  const isResetToday = lastReset === today
+
+  // Daily Roulette (legacy): фиксированные 3 спина — оставляем для обратной совместимости
+  const spinsRemaining =
+    lastSpin === today
+      ? Math.max(0, Number(row.daily_spins_remaining) ?? 3)
+      : 3
+
+  // Daily Points → Spins: 1 спин за 50 очков
+  const dailyPointsEarned = isResetToday ? Math.max(0, Number(row.daily_points_earned) ?? 0) : 0
+  const spinsUsedToday = isResetToday ? Math.max(0, Number(row.spins_used_today) ?? 0) : 0
+
   return {
     id: row.id,
     name: row.name ?? row.id,
     balance: Number(row.balance) ?? 0,
     color: row.color ?? (row.id === 'roma' ? 'cyan' : 'purple'),
+    daily_spins_remaining: spinsRemaining,
+    last_spin_date: lastSpin,
+    daily_points_earned: dailyPointsEarned,
+    spins_used_today: spinsUsedToday,
+    last_daily_reset: lastReset,
   }
 }
 
@@ -62,6 +82,7 @@ function dbTxToStore(row) {
     type: row.type ?? (row.amount >= 0 ? 'earn' : 'spend'),
     status: row.status ?? null,
     at: new Date(row.created_at).getTime(),
+    task_definition_id: row.task_definition_id ?? null,
   }
 }
 
@@ -128,6 +149,27 @@ export const useAppStore = create((set, get) => ({
     const userDaily = get().dailyBase[userId]
     return userDaily != null && userDaily[actionId] === today
   },
+
+  /** Проверка выполнения миссии по транзакциям (для multi-device sync через Realtime). */
+  isTaskCompleteFromTransactions: (userId, task) => {
+    const today = getDateKey()
+    const todayStart = new Date(today + 'T00:00:00').getTime()
+    const todayEnd = todayStart + 24 * 60 * 60 * 1000
+    const reason = task?.reason_template ?? task?.label
+    if (!reason) return false
+    const reasons = [reason]
+    if ((task?.bonus_reward ?? 0) > 0) reasons.push(`${reason} — бонус`)
+    const txs = get().transactions ?? []
+    return txs.some(
+      (t) =>
+        t.userId === userId &&
+        t.amount > 0 &&
+        t.type !== 'burn' &&
+        t.at >= todayStart &&
+        t.at < todayEnd &&
+        reasons.includes(t.description)
+    )
+  },
   markDailyBaseComplete: (userId, actionId) =>
     set((state) => ({
       dailyBase: {
@@ -160,11 +202,18 @@ export const useAppStore = create((set, get) => ({
   /**
    * Undo last completion of a daily task: find latest transaction for user with matching description,
    * remove it (refund/uncharge), clear daily state for that action.
+   * @param {string} reason - exact description, or pass array of possible descriptions (e.g. base + bonus)
    */
   undoDailyTask: (userId, actionId, reason) => {
     const state = get()
+    const reasons = Array.isArray(reason) ? reason : [reason]
     const tx = [...(state.transactions ?? [])]
-      .filter((t) => t.userId === userId && t.description === reason && t.amount > 0)
+      .filter(
+        (t) =>
+          t.userId === userId &&
+          t.amount > 0 &&
+          reasons.some((r) => t.description === r)
+      )
       .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0]
     if (tx) get().removeTransaction(tx.id)
     get().clearDailyComplete(userId, actionId)
@@ -182,31 +231,41 @@ export const useAppStore = create((set, get) => ({
     const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('family_lastActiveDate') : null
     if (stored !== today) {
       // New day: reset daily tracking
-      set({ 
-        dailyBase: {}, 
-        lastActiveDate: today, 
+      set((state) => ({
+        dailyBase: {},
+        lastActiveDate: today,
         todayTimeTracking: {},
         spinsUsedToday: { date: today, roma: 0, kirill: 0 },
         spinHistory: [],
-      })
+        users: state.users.map((u) => ({
+          ...u,
+          daily_points_earned: 0,
+          spins_used_today: 0,
+          last_daily_reset: today,
+        })),
+      }))
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('family_lastActiveDate', today)
         localStorage.removeItem('family_dailyBase')
       }
-      // Reset time tracking and timer state in database for all pilots
+      // Reset time tracking, timer state и Daily Roulette в БД для всех пилотов
       ;(async () => {
         try {
           await Promise.all(
             PILOT_IDS.map((id) =>
               supabase
                 .from('profiles')
-                .update({ 
-                  today_game_time: 0, 
+                .update({
+                  today_game_time: 0,
                   today_media_time: 0,
                   seconds_today: 0,
                   timer_status: 'idle',
                   timer_mode: null,
                   timer_start_at: null,
+                  daily_spins_remaining: 3,
+                  daily_points_earned: 0,
+                  spins_used_today: 0,
+                  last_daily_reset: today,
                 })
                 .eq('id', id)
             )
@@ -371,119 +430,129 @@ export const useAppStore = create((set, get) => ({
       }
     }),
 
-  /** Create one transaction row for the session; store its id in pilot.activeSessionId. */
-  createSessionTransaction: (pilotId, mode = 'game') => {
+  /** DB first: insert burn transaction, then update local state. */
+  createSessionTransaction: async (pilotId, mode = 'game') => {
     let desc = '🎮 Игровая сессия (Start)'
     if (mode === 'youtube') desc = '📺 Сессия (Start)'
     else if (mode === 'good') desc = '🍏 Полезная сессия (Start)'
-    const tempId = `session-${Date.now()}-${pilotId}`
-    const entry = {
-      id: tempId,
-      at: Date.now(),
-      userId: pilotId,
-      description: desc,
-      amount: 0,
-      type: 'burn',
-      status: 'active',
-    }
-    set((s) => ({
-      pilots: {
-        ...s.pilots,
-        [pilotId]: {
-          ...s.pilots[pilotId],
-          activeSessionId: tempId,
-          sessionTotalBurned: 0,
-        },
-      },
-      transactions: [entry, ...(s.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
-    }))
-    ;(async () => {
-      try {
-        const { data: row } = await supabase
-          .from('transactions')
-          .insert({
-            user_id: pilotId,
-            description: desc,
-            amount: 0,
-            type: 'burn',
-            status: 'active',
-          })
-          .select('id, created_at')
-          .single()
-        if (row) {
-          set((s) => ({
-            pilots: {
-              ...s.pilots,
-              [pilotId]: { ...s.pilots[pilotId], activeSessionId: row.id },
-            },
-            transactions: s.transactions.map((t) =>
-              t.id === tempId ? { ...t, id: row.id, at: new Date(row.created_at).getTime() } : t
-            ),
-          }))
-        }
-      } catch (e) {
-        console.error('createSessionTransaction:', e)
+    try {
+      const txId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const { data: row, error } = await supabase
+        .from('transactions')
+        .insert({
+          id: txId,
+          user_id: pilotId,
+          description: desc,
+          amount: 0,
+          type: 'burn',
+          status: 'active',
+        })
+        .select('id, created_at')
+        .single()
+      if (error) throw error
+      const entry = {
+        id: row.id,
+        at: new Date(row.created_at).getTime(),
+        userId: pilotId,
+        description: desc,
+        amount: 0,
+        type: 'burn',
+        status: 'active',
       }
-    })()
+      set((s) => ({
+        pilots: {
+          ...s.pilots,
+          [pilotId]: { ...s.pilots[pilotId], activeSessionId: row.id, sessionTotalBurned: 0 },
+        },
+        transactions: [entry, ...(s.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
+      }))
+    } catch (e) {
+      console.error('createSessionTransaction: Supabase failed', e)
+    }
   },
 
   /**
-   * Update the SINGLE active session transaction (in-place). Never insert/create here.
-   * The session row is created once by createSessionTransaction when the engine starts.
-   * We only UPDATE that row by activeSessionId (increment amount burned, refresh description).
+   * DB first: update burn tx + profiles (balance, today_game_time, today_media_time).
+   * Called every minute during session. Local state only on success.
    */
-  updateSessionBurn: (pilotId, rate, durationMinutes, mode = 'game') => {
+  updateSessionBurn: async (pilotId, rate, durationMinutes, mode = 'game') => {
     const state = get()
     const pilot = state.pilots?.[pilotId]
     const txId = pilot?.activeSessionId
-    if (!txId) return // No active session row — do not create one here; createSessionTransaction handles that
+    if (!txId) return
     const newTotal = (pilot.sessionTotalBurned ?? 0) + rate
     let desc = `🎮 Игровая сессия (${durationMinutes} мин)`
     if (mode === 'youtube') desc = `📺 Сессия (${durationMinutes} мин)`
     else if (mode === 'good') desc = `🍏 Полезная сессия (${durationMinutes} мин)`
-    set((s) => {
-      const u = s.users.find((x) => x.id === pilotId)
-      const newBalance = u ? Math.max(0, (u.balance ?? 0) - rate) : 0
-      // In-place UPDATE only: find the active session tx by id and update it; never push a new transaction
-      const txList = (s.transactions ?? []).map((t) =>
-        t.id === txId ? { ...t, amount: -newTotal, description: desc } : t
-      )
-      return {
-        users: s.users.map((u) => (u.id === pilotId ? { ...u, balance: newBalance } : u)),
-        transactions: txList,
-        pilots: {
-          ...s.pilots,
-          [pilotId]: { ...s.pilots[pilotId], sessionTotalBurned: newTotal },
-        },
-      }
-    })
-    const user = get().users.find((u) => u.id === pilotId)
-    get().addGamingMinutesToday(1, mode, [pilotId])
-    ;(async () => {
-      try {
-        // Get updated time tracking after increment
-        const updatedState = get()
-        const timeTracking = updatedState.todayTimeTracking?.[pilotId] ?? { game: 0, media: 0 }
-        await supabase
-          .from('transactions')
-          .update({ amount: -newTotal, description: desc })
-          .eq('id', txId)
-        await supabase
-          .from('profiles')
-          .update({
-            balance: Math.max(0, (user?.balance ?? 0) - rate),
-            today_game_time: timeTracking.game,
-            today_media_time: timeTracking.media,
-          })
-          .eq('id', pilotId)
-      } catch (e) {
-        console.error('updateSessionBurn sync:', e)
-      }
-    })()
+
+    const user = state.users.find((u) => u.id === pilotId)
+    const newBalance = user ? Math.max(0, (user.balance ?? 0) - rate) : 0
+    const currentTracking = state.todayTimeTracking?.[pilotId] ?? { game: 0, media: 0 }
+    const isMedia = mode === 'youtube' || mode === 'good'
+    const newGameTime = isMedia ? currentTracking.game : currentTracking.game + 1
+    const newMediaTime = isMedia ? currentTracking.media + 1 : currentTracking.media
+
+    try {
+      const { error: txErr } = await supabase
+        .from('transactions')
+        .update({ amount: -newTotal, description: desc })
+        .eq('id', txId)
+      if (txErr) throw txErr
+
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({
+          balance: newBalance,
+          today_game_time: newGameTime,
+          today_media_time: newMediaTime,
+        })
+        .eq('id', pilotId)
+      if (profileErr) throw profileErr
+
+      const today = getDateKey()
+      const modeKey = mode === 'youtube' ? 'youtube' : mode === 'good' ? 'good' : 'game'
+      set((s) => {
+        const prevBreakdown = s.dailyGamingBreakdown?.[today] ?? {
+          game: { roma: 0, kirill: 0 },
+          youtube: { roma: 0, kirill: 0 },
+          good: { roma: 0, kirill: 0 },
+        }
+        const nextBreakdown = { ...prevBreakdown }
+        if (!nextBreakdown[modeKey]) nextBreakdown[modeKey] = { roma: 0, kirill: 0 }
+        nextBreakdown[modeKey] = {
+          ...nextBreakdown[modeKey],
+          [pilotId]: (nextBreakdown[modeKey][pilotId] ?? 0) + 1,
+        }
+        return {
+          users: s.users.map((u) => (u.id === pilotId ? { ...u, balance: newBalance } : u)),
+          transactions: (s.transactions ?? []).map((t) =>
+            t.id === txId ? { ...t, amount: -newTotal, description: desc } : t
+          ),
+          pilots: {
+            ...s.pilots,
+            [pilotId]: { ...s.pilots[pilotId], sessionTotalBurned: newTotal },
+          },
+          todayTimeTracking: {
+            ...(s.todayTimeTracking ?? {}),
+            [pilotId]: { game: newGameTime, media: newMediaTime },
+          },
+          dailyGamingBreakdown: {
+            ...(s.dailyGamingBreakdown ?? {}),
+            [today]: nextBreakdown,
+          },
+          gamingToday: {
+            dateKey: today,
+            minutes: (s.gamingToday?.dateKey === today ? s.gamingToday.minutes : 0) + 1,
+          },
+        }
+      })
+    } catch (e) {
+      console.error('updateSessionBurn: Supabase failed', e)
+    }
   },
 
-  /** Finalize session transaction (description, status=completed) and clear pilot session state. */
-  finalizeSessionTransaction: (pilotId) => {
+  /** DB first: update burn tx to completed, then clear pilot state. */
+  finalizeSessionTransaction: async (pilotId) => {
     const state = get()
     const pilot = state.pilots?.[pilotId]
     const txId = pilot?.activeSessionId
@@ -492,30 +561,25 @@ export const useAppStore = create((set, get) => ({
     let desc = `🎮 Игровая сессия (${sessionMinutes} мин)`
     if (mode === 'youtube') desc = `📺 Сессия (${sessionMinutes} мин)`
     else if (mode === 'good') desc = `🍏 Полезная сессия (${sessionMinutes} мин)`
+
     if (txId) {
-      set((s) => {
-        const txList = (s.transactions ?? []).map((t) =>
-          t.id === txId ? { ...t, description: desc, status: 'completed' } : t
-        )
-        return {
-          transactions: txList,
-          pilots: {
-            ...s.pilots,
-            [pilotId]: initialPilotState(),
-          },
-        }
-      })
-      ;(async () => {
-        try {
-          await supabase.from('transactions').update({ description: desc, status: 'completed' }).eq('id', txId)
-        } catch (e) {
-          console.error('finalizeSessionTransaction:', e)
-        }
-      })()
+      try {
+        const { error } = await supabase
+          .from('transactions')
+          .update({ description: desc, status: 'completed' })
+          .eq('id', txId)
+        if (error) throw error
+        set((s) => ({
+          transactions: (s.transactions ?? []).map((t) =>
+            t.id === txId ? { ...t, description: desc, status: 'completed' } : t
+          ),
+          pilots: { ...s.pilots, [pilotId]: initialPilotState() },
+        }))
+      } catch (e) {
+        console.error('finalizeSessionTransaction: Supabase failed', e)
+      }
     } else {
-      set((s) => ({
-        pilots: { ...s.pilots, [pilotId]: initialPilotState() },
-      }))
+      set((s) => ({ pilots: { ...s.pilots, [pilotId]: initialPilotState() } }))
     }
   },
 
@@ -574,7 +638,7 @@ export const useAppStore = create((set, get) => ({
           },
         },
       }))
-      if (!isResuming) get().createSessionTransaction(pilotId, m)
+      if (!isResuming) await get().createSessionTransaction(pilotId, m)
     } catch (e) {
       console.error('startTimer sync:', e)
       throw e
@@ -667,8 +731,6 @@ export const useAppStore = create((set, get) => ({
     const pilot = state.pilots?.[pilotId]
     if (!pilot || pilot.timerStatus === 'idle') return
 
-    console.log('[StopTimer] Starting sequence for:', pilotId)
-
     // Total session time: running → (now - start); paused → session_elapsed
     let totalSeconds = 0
     if (pilot.timerStatus === 'running' && pilot.timerStartAt) {
@@ -684,19 +746,8 @@ export const useAppStore = create((set, get) => ({
     const baseSeconds = pilot.secondsToday ?? 0
     const newSecondsToday = baseSeconds + totalSeconds
 
-    console.log(`[StopTimer] Total: ${totalSeconds}s, Cost: ${cost} XP, New balance: ${newBalance}`)
-
-    // ——— Step B (optimistic): Update UI immediately ———
-    set((s) => ({
-      pilots: {
-        ...s.pilots,
-        [pilotId]: initialPilotState(),
-      },
-      users: s.users.map((u) => (u.id === pilotId ? { ...u, balance: newBalance } : u)),
-    }))
-
-    // ——— Step C: Database — STOP: clear timer and session_elapsed, deduct balance ———
-    const { error: profileError } = await supabase
+    try {
+      const { error: profileError } = await supabase
       .from('profiles')
       .update({
         timer_status: 'idle',
@@ -707,19 +758,9 @@ export const useAppStore = create((set, get) => ({
       })
       .eq('id', pilotId)
 
-    if (profileError) {
-      console.error('[StopTimer] ❌ PROFILE UPDATE FAILED:', profileError)
-      set({ lastOfflineSyncToast: { message: `Ошибка сохранения: ${profileError.message}` } })
-      // Revert local state so UI matches server (no zombie “stopped”)
-      set((s) => ({
-        pilots: { ...s.pilots, [pilotId]: pilot },
-        users: s.users.map((u) => (u.id === pilotId ? { ...u, balance: currentBalance } : u)),
-      }))
-      return
-    }
-    console.log('[StopTimer] ✅ Profile updated successfully')
+    if (profileError) throw profileError
 
-    // ——— Step D: Transaction insert (text id to prevent 400 with rebuilt transactions table) ———
+    // Transaction insert
     if (cost > 0) {
       const txId = Date.now().toString()
       const { error: transError } = await supabase.from('transactions').insert({
@@ -729,10 +770,19 @@ export const useAppStore = create((set, get) => ({
         type: 'expense',
         description: `Сессия: ${pilot.mode ?? 'game'} (${minutes} мин)`,
       })
-      if (transError) console.error('[StopTimer] ⚠️ Transaction failed (non-critical):', transError)
+      if (transError) throw transError
     }
 
-    get().finalizeSessionTransaction(pilotId)
+    await get().finalizeSessionTransaction(pilotId)
+
+    set((s) => ({
+      pilots: { ...s.pilots, [pilotId]: initialPilotState() },
+      users: s.users.map((u) => (u.id === pilotId ? { ...u, balance: newBalance } : u)),
+    }))
+    } catch (e) {
+      console.error('stopTimer: Supabase failed', e)
+      set({ lastOfflineSyncToast: { message: `Ошибка сохранения: ${e?.message ?? 'Неизвестная ошибка'}` } })
+    }
   },
 
   // Legacy alias for backward compatibility
@@ -809,26 +859,25 @@ export const useAppStore = create((set, get) => ({
     return (state.pilots?.roma?.status === 'RUNNING' || state.pilots?.kirill?.status === 'RUNNING')
   },
 
-  /** After each minute burn: update last_burn_at in Supabase to avoid double-charge across devices. */
-  updateLastBurnAt: (pilotId) => {
+  /** DB first: update last_burn_at in profiles to avoid double-charge across devices. */
+  updateLastBurnAt: async (pilotId) => {
     const now = new Date().toISOString()
-    set((state) => {
-      const p = state.pilots?.[pilotId]
-      if (!p) return state
-      return {
-        pilots: {
-          ...state.pilots,
-          [pilotId]: { ...p, lastBurnAt: now },
-        },
-      }
-    })
-    ;(async () => {
-      try {
-        await supabase.from('profiles').update({ last_burn_at: now }).eq('id', pilotId)
-      } catch (e) {
-        console.error('updateLastBurnAt:', e)
-      }
-    })()
+    try {
+      const { error } = await supabase.from('profiles').update({ last_burn_at: now }).eq('id', pilotId)
+      if (error) throw error
+      set((state) => {
+        const p = state.pilots?.[pilotId]
+        if (!p) return state
+        return {
+          pilots: {
+            ...state.pilots,
+            [pilotId]: { ...p, lastBurnAt: now },
+          },
+        }
+      })
+    } catch (e) {
+      console.error('updateLastBurnAt: Supabase failed', e)
+    }
   },
 
   /** One-time toast payload after offline catch-up or fuel-out; UI shows then clears. */
@@ -842,8 +891,37 @@ export const useAppStore = create((set, get) => ({
     try {
       const [profilesRes, txRes] = await Promise.all([
         supabase.from('profiles').select('*').order('id'),
-        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(MAX_TRANSACTIONS),
+        supabase
+          .from('transactions')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(MAX_TRANSACTIONS),
       ])
+      
+      // Если Supabase вернул ошибку по профилям/транзакциям, не оставляем приложение
+      // в вечном состоянии «Загрузка…». Пишем ошибку в консоль и включаем
+      // безопасный оффлайн‑режим с локальными профилями (Кирилл/Рома).
+      if (profilesRes.error || txRes.error) {
+        console.error('fetchState: Supabase error', {
+          profilesError: profilesRes.error,
+          transactionsError: txRes.error,
+        })
+        const fallbackUsers = [
+          { id: 'kirill', name: 'Кирилл', balance: 0, color: 'purple' },
+          { id: 'roma', name: 'Рома', balance: 0, color: 'cyan' },
+        ]
+        set({
+          users: fallbackUsers,
+          transactions: [],
+          raidProgress: 0,
+          todayTimeTracking: {},
+          isLoading: false,
+          lastOfflineSyncToast: {
+            message: 'Нет связи с сервером. Включён оффлайн‑режим: данные могут не сохраниться.',
+          },
+        })
+        return
+      }
       // CRITICAL: Ensure users are ordered with Kirill first, Roma second
       const allUsers = (profilesRes.data ?? []).map(profileToUser)
       const users = [
@@ -875,12 +953,18 @@ export const useAppStore = create((set, get) => ({
           .maybeSingle()
         if (settingsRow && typeof settingsRow.value === 'number') {
           const settingsValue = Number(settingsRow.value) || 0
-          // Use settings value, but if calculated differs significantly, log warning
-          raidProgress = settingsValue
+          // При рассинхроне: используем calculated (транзакции — источник правды) и синхронизируем settings
           if (Math.abs(settingsValue - calculatedRaidProgress) > 10) {
-            console.warn(
-              `Raid progress desync detected: settings=${settingsValue}, calculated=${calculatedRaidProgress}. Using settings value.`
-            )
+            raidProgress = calculatedRaidProgress
+            try {
+              await supabase
+                .from('settings')
+                .upsert({ key: 'raid_progress', value: calculatedRaidProgress }, { onConflict: 'key' })
+            } catch (e) {
+              console.warn('fetchState: failed to sync raid progress to settings', e)
+            }
+          } else {
+            raidProgress = settingsValue
           }
         } else {
           // No settings value - use calculated from transactions
@@ -977,9 +1061,11 @@ export const useAppStore = create((set, get) => ({
           let desc = '🎮 Игровая сессия (Start)'
           if (sessionMode === 'youtube') desc = '📺 Сессия (Start)'
           else if (sessionMode === 'good') desc = '🍏 Полезная сессия (Start)'
+          const burnTxId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`
           const { data: newRow } = await supabase
             .from('transactions')
             .insert({
+              id: burnTxId,
               user_id: pilotId,
               description: desc,
               amount: 0,
@@ -1226,9 +1312,9 @@ export const useAppStore = create((set, get) => ({
   },
 
   /**
-   * Supabase Realtime: subscribe to profiles for timer sync.
-   * "Gentle" subscription: no removeAllChannels(); skip if already connected/connecting
-   * so React Strict Mode double-mount does not kill the first handshake.
+   * Supabase Realtime: подписка на profiles и transactions для синхронизации между устройствами.
+   * Канал custom-all-channel, обработка INSERT/UPDATE/DELETE.
+   * Защита от двойной подписки при React Strict Mode.
    */
   subscribeToRealtime: () => {
     const state = get()
@@ -1238,28 +1324,47 @@ export const useAppStore = create((set, get) => ({
     }
 
     set({ realtimeStatus: 'connecting' })
-    console.log('[Realtime] Init subscription...')
+    if (import.meta.env.DEV) console.log('[Realtime] Init subscription (profiles + transactions)...')
     const syncTimerStateFromProfile = get().syncTimerStateFromProfile
+    let realtimeErrorLogged = false
 
     const channel = supabase
-      .channel('room_1')
+      .channel('custom-all-channel')
+      // profiles: INSERT, UPDATE, DELETE
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles' },
+        { event: 'INSERT', schema: 'public', table: 'profiles' },
         (payload) => {
-          console.log('[Realtime] Update:', payload.eventType, payload)
-          const newProfile = payload.new
-          const eventType = payload.eventType
-
-          if ((eventType !== 'UPDATE' && eventType !== 'INSERT') || !newProfile) return
-
-          const row = newProfile
+          const row = payload.new
+          if (!row) return
+          set((s) => {
+            const updatedUser = profileToUser(row)
+            const current = s.users ?? []
+            const exists = current.some((u) => u.id === updatedUser.id)
+            const nextUsers = exists
+              ? current.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+              : [...current, updatedUser]
+            const nextTracking = { ...(s.todayTimeTracking ?? {}) }
+            if (PILOT_IDS.includes(row.id)) {
+              nextTracking[row.id] = {
+                game: Number(row.today_game_time ?? 0),
+                media: Number(row.today_media_time ?? 0),
+              }
+            }
+            return { users: nextUsers, todayTimeTracking: nextTracking }
+          })
+          if (PILOT_IDS.includes(row.id)) syncTimerStateFromProfile(row)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles' },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
           const pilotId = row.id
-          if (!PILOT_IDS.includes(pilotId)) return
-
           const incomingSeconds = Number(row.seconds_today ?? 0)
-          const localState = get()
-          const localPilot = localState.pilots?.[pilotId]
+          const localPilot = get().pilots?.[pilotId]
           const localSeconds = localPilot?.secondsToday ?? 0
           if (
             localPilot &&
@@ -1268,23 +1373,86 @@ export const useAppStore = create((set, get) => ({
           ) {
             return
           }
-
           set((s) => {
             const updatedUser = profileToUser(row)
             const current = s.users ?? []
             const exists = current.some((u) => u.id === updatedUser.id)
-            return {
-              users: exists
-                ? current.map((u) => (u.id === updatedUser.id ? updatedUser : u))
-                : [...current, updatedUser],
+            const nextUsers = exists
+              ? current.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+              : [...current, updatedUser]
+            const nextTracking = { ...(s.todayTimeTracking ?? {}) }
+            if (PILOT_IDS.includes(pilotId)) {
+              nextTracking[pilotId] = {
+                game: Number(row.today_game_time ?? 0),
+                media: Number(row.today_media_time ?? 0),
+              }
             }
+            return { users: nextUsers, todayTimeTracking: nextTracking }
           })
-
-          syncTimerStateFromProfile(row)
+          if (PILOT_IDS.includes(pilotId)) syncTimerStateFromProfile(row)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'profiles' },
+        (payload) => {
+          const oldRow = payload.old
+          if (!oldRow?.id) return
+          const deletedId = oldRow.id
+          set((s) => ({
+            users: (s.users ?? []).filter((u) => u.id !== deletedId),
+            pilots: PILOT_IDS.includes(deletedId)
+              ? { ...s.pilots, [deletedId]: initialPilotState() }
+              : s.pilots,
+          }))
+        }
+      )
+      // transactions: INSERT, UPDATE, DELETE
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'transactions' },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
+          const newTx = dbTxToStore(row)
+          set((s) => {
+            const list = s.transactions ?? []
+            const exists = list.some((t) => t.id === newTx.id)
+            if (exists) {
+              return { transactions: list.map((t) => (t.id === newTx.id ? newTx : t)) }
+            }
+            return { transactions: [newTx, ...list].slice(0, MAX_TRANSACTIONS) }
+          })
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'transactions' },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
+          const updatedTx = dbTxToStore(row)
+          set((s) => ({
+            transactions: (s.transactions ?? []).map((t) =>
+              t.id === updatedTx.id ? updatedTx : t
+            ),
+          }))
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'transactions' },
+        (payload) => {
+          const oldRow = payload.old
+          if (!oldRow?.id) return
+          const deletedId = oldRow.id
+          set((s) => ({
+            transactions: (s.transactions ?? []).filter((t) => t.id !== deletedId),
+          }))
         }
       )
       .subscribe((status, err) => {
-        console.log('[Realtime] Status:', status, err ?? '')
+        if (import.meta.env.DEV) console.log('[Realtime] Status:', status, err ?? '')
         if (status === 'SUBSCRIBED') {
           set({ realtimeStatus: 'connected' })
           supabase
@@ -1301,7 +1469,10 @@ export const useAppStore = create((set, get) => ({
             })
             .catch((syncErr) => console.error('[Realtime] Failed to sync current state:', syncErr))
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || err) {
-          console.error('[Realtime] Connection Error:', err)
+          if (!realtimeErrorLogged) {
+            realtimeErrorLogged = true
+            if (import.meta.env.DEV) console.warn('[Realtime] WebSocket недоступен (работа без live-синхронизации)')
+          }
           set({ realtimeStatus: 'error' })
         } else if (status === 'CLOSED') {
           set({ realtimeStatus: 'idle' })
@@ -1320,203 +1491,294 @@ export const useAppStore = create((set, get) => ({
    * Uses optimistic update, then syncs with Supabase settings (key: raid_progress).
    */
   /**
-   * CRITICAL: Raid Boss contribution — tracks NET XP (earn/spend, excluding burn).
-   * Positive amount → boss получает урон. Отрицательное → босс «лечится».
-   * Позволяем overflow выше RAID_TARGET, но не опускаемся ниже 0.
+   * Raid Boss: DB first. Positive amount → boss получает урон. Отрицательное → босс «лечится».
    */
-  damageBoss: (amount) => {
+  damageBoss: async (amount) => {
     const delta = Number(amount)
     if (!delta || !Number.isFinite(delta)) return
-
-    // Optimistic local update so UI (RaidBoss) reacts instantly.
-    set((state) => {
-      const current = state.raidProgress ?? 0
-      const next = Math.max(0, current + delta)
+    try {
+      const { data: settingsRow } = await supabase
+        .from('settings')
+        .select('key, value')
+        .eq('key', 'raid_progress')
+        .maybeSingle()
+      const currentRemote = settingsRow && typeof settingsRow.value === 'number'
+        ? Number(settingsRow.value) || 0
+        : 0
+      const next = Math.max(0, currentRemote + delta)
+      const { error } = await supabase
+        .from('settings')
+        .upsert({ key: 'raid_progress', value: next }, { onConflict: 'key' })
+      if (error) throw error
+      set({ raidProgress: next })
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(RAID_STORAGE_KEY, String(next))
       }
-      return { raidProgress: next }
-    })
-
-    // Sync with settings table; use remote value as source of truth when possible.
-    ;(async () => {
-      try {
-        const { data: settingsRow } = await supabase
-          .from('settings')
-          .select('key, value')
-          .eq('key', 'raid_progress')
-          .maybeSingle()
-        const currentRemote = settingsRow && typeof settingsRow.value === 'number'
-          ? Number(settingsRow.value) || 0
-          : 0
-        const next = Math.max(0, currentRemote + delta)
-        await supabase
-          .from('settings')
-          .upsert({ key: 'raid_progress', value: next }, { onConflict: 'key' })
-        set({ raidProgress: next })
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(RAID_STORAGE_KEY, String(next))
-        }
-      } catch (e) {
-        console.warn('damageBoss settings sync (optional):', e)
-      }
-    })()
+    } catch (e) {
+      console.error('damageBoss: Supabase failed', e)
+    }
   },
 
-  // skipBoss: true — не трогаем Raid Boss (для возвратов и т.п.)
-  addPoints: (userId, amount, reason, skipBoss = false) => {
+  /** DB first: insert tx → update profile → damageBoss. Local state only on success. */
+  addPoints: async (userId, amount, reason, skipBoss = false) => {
     const num = Math.abs(Number(amount))
     if (!num || num <= 0) return
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    const entry = {
-      id: tempId,
-      at: Date.now(),
-      userId,
-      description: reason ?? 'Начислено',
-      amount: num,
-      type: 'earn',
-    }
-    set((state) => ({
-      users: state.users.map((u) =>
-        u.id === userId ? { ...u, balance: u.balance + num } : u
-      ),
-      transactions: [entry, ...(state.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
-    }))
-    ;(async () => {
-      try {
-        const { data: txRow } = await supabase
-          .from('transactions')
-          .insert({
-            user_id: userId,
-            amount: num,
-            description: reason ?? 'Начислено',
-            type: 'earn',
-          })
-          .select('id, created_at')
-          .single()
-        const user = get().users.find((u) => u.id === userId)
-        await supabase.from('profiles').update({ balance: user?.balance ?? 0 }).eq('id', userId)
+    const today = getDateKey()
+    const state = get()
+    const user = state.users.find((u) => u.id === userId)
+    const lastReset = user?.last_daily_reset ?? null
+    const isResetToday = lastReset === today
+    const prevDaily = isResetToday ? (user?.daily_points_earned ?? 0) : 0
+    const newDailyPoints = prevDaily + num
+    const newBalance = (user?.balance ?? 0) + num
 
-        // Raid Boss: apply net positive XP as damage (если не пропущено флагом).
-        if (!skipBoss) get().damageBoss(num)
-        if (txRow) {
-          set((state) => ({
-            transactions: state.transactions.map((t) =>
-              t.id === tempId ? { ...t, id: txRow.id, at: new Date(txRow.created_at).getTime() } : t
-            ),
-          }))
-        }
-      } catch (e) {
-        console.error('addPoints sync:', e)
+    try {
+      const txId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const { data: txRow, error: txErr } = await supabase
+        .from('transactions')
+        .insert({
+          id: txId,
+          user_id: userId,
+          amount: num,
+          description: reason ?? 'Начислено',
+          type: 'earn',
+        })
+        .select('id, created_at')
+        .single()
+      if (txErr) throw txErr
+
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({
+          balance: newBalance,
+          daily_points_earned: newDailyPoints,
+          last_daily_reset: today,
+        })
+        .eq('id', userId)
+      if (profileErr) throw profileErr
+
+      if (!skipBoss) await get().damageBoss(num)
+
+      const entry = {
+        id: txRow.id,
+        at: new Date(txRow.created_at).getTime(),
+        userId,
+        description: reason ?? 'Начислено',
+        amount: num,
+        type: 'earn',
       }
-    })()
+      set((s) => ({
+        users: s.users.map((u) =>
+          u.id === userId
+            ? { ...u, balance: newBalance, daily_points_earned: newDailyPoints, last_daily_reset: today }
+            : u
+        ),
+        transactions: [entry, ...(s.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
+      }))
+    } catch (e) {
+      console.error('addPoints: Supabase failed', e)
+    }
+  },
+
+  /** DB first: reset raid progress in settings. */
+  resetRaidProgress: async () => {
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .upsert({ key: 'raid_progress', value: 0 }, { onConflict: 'key' })
+      if (error) throw error
+      set({ raidProgress: 0 })
+      if (typeof localStorage !== 'undefined') localStorage.setItem(RAID_STORAGE_KEY, '0')
+    } catch (e) {
+      console.error('resetRaidProgress: Supabase failed', e)
+    }
+  },
+
+  /** DB first: insert tx → update profile → damageBoss. Local state only on success. */
+  spendPoints: async (userId, amount, reason) => {
+    const num = Math.abs(Number(amount))
+    if (!num || num <= 0) return
+    const state = get()
+    const user = state.users.find((u) => u.id === userId)
+    const newBalance = Math.max(0, (user?.balance ?? 0) - num)
+
+    try {
+      const txId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const { data: txRow, error: txErr } = await supabase
+        .from('transactions')
+        .insert({
+          id: txId,
+          user_id: userId,
+          amount: -num,
+          description: reason ?? 'Списано',
+          type: 'spend',
+        })
+        .select('id, created_at')
+        .single()
+      if (txErr) throw txErr
+
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({ balance: newBalance })
+        .eq('id', userId)
+      if (profileErr) throw profileErr
+
+      await get().damageBoss(-num)
+
+      const entry = {
+        id: txRow.id,
+        at: new Date(txRow.created_at).getTime(),
+        userId,
+        description: reason ?? 'Списано',
+        amount: -num,
+        type: 'spend',
+      }
+      set((s) => ({
+        users: s.users.map((u) => (u.id === userId ? { ...u, balance: newBalance } : u)),
+        transactions: [entry, ...(s.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
+      }))
+    } catch (e) {
+      console.error('spendPoints: Supabase failed', e)
+    }
+  },
+
+  /** DB first: insert transaction for wheel win (amount 0). */
+  logWheelWin: async (userId, description) => {
+    try {
+      const txId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const { data: txRow, error } = await supabase
+        .from('transactions')
+        .insert({
+          id: txId,
+          user_id: userId,
+          amount: 0,
+          description: description ?? '🎰 Выигрыш',
+          type: 'earn',
+        })
+        .select('id, created_at')
+        .single()
+      if (error) throw error
+      const entry = {
+        id: txRow.id,
+        at: new Date(txRow.created_at).getTime(),
+        userId,
+        description: description ?? '🎰 Выигрыш',
+        amount: 0,
+        type: 'earn',
+      }
+      set((s) => ({
+        transactions: [entry, ...(s.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
+      }))
+    } catch (e) {
+      console.error('logWheelWin: Supabase failed', e)
+    }
   },
 
   /**
-   * Reset raid progress to 0. Note: This does NOT delete transactions,
-   * so recalculating from transactions will restore progress.
-   * For a true reset, transactions should be cleared separately.
+   * Доступные спины: floor(daily_points_earned / 50) - spins_used_today.
+   * Защита от отрицательных значений.
    */
-  resetRaidProgress: () => {
-    set({ raidProgress: 0 })
-    if (typeof localStorage !== 'undefined') localStorage.setItem(RAID_STORAGE_KEY, '0')
-    ;(async () => {
-      try {
-        await supabase
-          .from('settings')
-          .upsert({ key: 'raid_progress', value: 0 }, { onConflict: 'key' })
-      } catch (e) {
-        console.warn('resetRaidProgress settings sync (optional):', e)
-      }
-    })()
+  getAvailableSpins: (childId) => {
+    const state = get()
+    const user = state.users.find((u) => u.id === childId)
+    const earned = user?.daily_points_earned ?? 0
+    const used = user?.spins_used_today ?? 0
+    return Math.max(0, Math.floor(earned / 50) - used)
   },
 
-  spendPoints: (userId, amount, reason) => {
-    const num = Math.abs(Number(amount))
-    if (!num || num <= 0) return
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    const entry = {
-      id: tempId,
-      at: Date.now(),
-      userId,
-      description: reason ?? 'Списано',
-      amount: -num,
-      type: 'spend',
-    }
-    set((state) => ({
-      users: state.users.map((u) =>
-        u.id === userId ? { ...u, balance: Math.max(0, u.balance - num) } : u
-      ),
-      transactions: [entry, ...(state.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
-    }))
-    ;(async () => {
-      try {
-        const { data: txRow } = await supabase
-          .from('transactions')
-          .insert({
-            user_id: userId,
-            amount: -num,
-            description: reason ?? 'Списано',
-            type: 'spend',
-          })
-          .select('id, created_at')
-          .single()
-        const user = get().users.find((u) => u.id === userId)
-        await supabase.from('profiles').update({ balance: Math.max(0, user?.balance ?? 0) }).eq('id', userId)
-
-        // Raid Boss: negative XP (штрафы/ручное снятие) лечит босса.
-        get().damageBoss(-num)
-
-        if (txRow) {
-          set((state) => ({
-            transactions: state.transactions.map((t) =>
-              t.id === tempId ? { ...t, id: txRow.id, at: new Date(txRow.created_at).getTime() } : t
-            ),
-          }))
-        }
-      } catch (e) {
-        console.error('spendPoints sync:', e)
-      }
-    })()
+  /**
+   * Очков до следующего спина: 50 - (daily_points_earned % 50).
+   * При earned % 50 === 0 возвращает 50 (нужно ещё 50 для следующего).
+   */
+  getPointsToNextSpin: (childId) => {
+    const state = get()
+    const user = state.users.find((u) => u.id === childId)
+    const earned = user?.daily_points_earned ?? 0
+    const remainder = earned % 50
+    return remainder === 0 ? 50 : 50 - remainder
   },
 
-  /** Log a wheel-of-fortune win (record only, amount 0). For +20 min use addPoints separately. */
-  logWheelWin: (userId, description) => {
-    const tempId = `wheel-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    const entry = {
-      id: tempId,
-      at: Date.now(),
-      userId,
-      description: description ?? '🎰 Выигрыш',
-      amount: 0,
-      type: 'earn',
-    }
-    set((state) => ({
-      transactions: [entry, ...(state.transactions ?? [])].slice(0, MAX_TRANSACTIONS),
-    }))
-    ;(async () => {
-      try {
-        const { data: txRow } = await supabase
-          .from('transactions')
-          .insert({
-            user_id: userId,
-            amount: 0,
-            description: description ?? '🎰 Выигрыш',
-            type: 'earn',
-          })
-          .select('id, created_at')
-          .single()
-        if (txRow) {
-          set((state) => ({
-            transactions: state.transactions.map((t) =>
-              t.id === tempId ? { ...t, id: txRow.id, at: new Date(txRow.created_at).getTime() } : t
-            ),
-          }))
-        }
-      } catch (e) {
-        console.warn('logWheelWin sync (optional):', e)
+  /**
+   * Daily Points → Spins: DB first. spins_used_today MUST be updated in profiles immediately.
+   * @param {string} childId — id пилота (roma | kirill)
+   * @param {object} prize — { id, label, type, value, icon }
+   * @returns {Promise<boolean>} true если спин использован, false если нет доступных
+   */
+  useSpin: async (childId, prize) => {
+    const state = get()
+    const available = get().getAvailableSpins(childId)
+    if (available < 1) return false
+
+    const today = getDateKey()
+    const user = state.users.find((u) => u.id === childId)
+    const lastReset = user?.last_daily_reset ?? null
+    const isResetToday = lastReset === today
+    const newSpinsUsed = (isResetToday ? (user?.spins_used_today ?? 0) : 0) + 1
+
+    try {
+      // 1. CRITICAL: subtract 1 from spins_used_today in profiles FIRST
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({
+          spins_used_today: newSpinsUsed,
+          last_daily_reset: today,
+        })
+        .eq('id', childId)
+      if (profileErr) throw profileErr
+
+      // 2. Local state update (Realtime will also deliver, but immediate for UI)
+      set((s) => ({
+        users: s.users.map((u) =>
+          u.id === childId ? { ...u, spins_used_today: newSpinsUsed, last_daily_reset: today } : u
+        ),
+      }))
+
+      // 3. Записать приз в историю (spinHistory) — локально
+      get().addWheelSpin(childId, prize)
+
+      // 4. Записать в transactions (logWheelWin)
+      await get().logWheelWin(childId, prize?.label ? `🎰 Daily Roulette: ${prize.label}` : '🎰 Выигрыш')
+
+      // 5. Применить приз: XP если prize.type === 'xp'
+      if (prize?.type === 'xp' && typeof prize?.value === 'number' && prize.value > 0) {
+        await get().addPoints(childId, prize.value, `🎰 Daily Roulette: ${prize.label ?? 'XP'}`, false)
       }
-    })()
+
+      return true
+    } catch (e) {
+      console.error('useSpin: Supabase failed', e)
+      return false
+    }
+  },
+
+  /** Daily Roulette (legacy): DB first. Списывает один спин в profiles. */
+  consumeDailySpin: async (pilotId) => {
+    const state = get()
+    const user = state.users.find((u) => u.id === pilotId)
+    const today = getDateKey()
+    const remaining = user?.daily_spins_remaining ?? 3
+    if (remaining <= 0) return false
+
+    const nextRemaining = remaining - 1
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          daily_spins_remaining: nextRemaining,
+          last_spin_date: today,
+        })
+        .eq('id', pilotId)
+      if (error) throw error
+      set((s) => ({
+        users: s.users.map((u) =>
+          u.id === pilotId ? { ...u, daily_spins_remaining: nextRemaining, last_spin_date: today } : u
+        ),
+      }))
+      return true
+    } catch (e) {
+      console.error('consumeDailySpin: Supabase failed', e)
+      return false
+    }
   },
 
   /**
@@ -1561,65 +1823,87 @@ export const useAppStore = create((set, get) => ({
     })
   },
 
-  removeTransaction: (transactionId) => {
+  /** DB first: delete tx → update profile → raid_progress. Local state only on success. */
+  removeTransaction: async (transactionId) => {
     const state = get()
     const tx = (state.transactions ?? []).find((t) => t.id === transactionId)
     if (!tx) return
     const isTemp = String(transactionId).startsWith('temp-')
+    if (isTemp) {
+      const today = getDateKey()
+      const txDate = tx.at ? new Date(tx.at).toISOString().slice(0, 10) : null
+      const isEarnToday = tx.type === 'earn' && tx.amount > 0 && txDate === today
+      set((s) => {
+        let updatedUsers = s.users.map((u) =>
+          u.id === tx.userId ? { ...u, balance: Math.max(0, u.balance - tx.amount) } : u
+        )
+        if (isEarnToday) {
+          updatedUsers = updatedUsers.map((u) => {
+            if (u.id !== tx.userId) return u
+            return { ...u, daily_points_earned: Math.max(0, (u.daily_points_earned ?? 0) - tx.amount) }
+          })
+        }
+        let nextRaid = s.raidProgress ?? 0
+        if (tx.type === 'earn' || tx.type === 'spend') {
+          nextRaid = Math.max(0, nextRaid - tx.amount)
+        }
+        return {
+          users: updatedUsers,
+          transactions: (s.transactions ?? []).filter((t) => t.id !== transactionId),
+          raidProgress: nextRaid,
+        }
+      })
+      return
+    }
 
-    set((s) => {
-      // Invert transaction impact on balance.
-      const updatedUsers = s.users.map((u) =>
-        u.id === tx.userId ? { ...u, balance: Math.max(0, u.balance - tx.amount) } : u
-      )
+    const today = getDateKey()
+    const txDate = tx.at ? new Date(tx.at).toISOString().slice(0, 10) : null
+    const isEarnToday = tx.type === 'earn' && tx.amount > 0 && txDate === today
 
-      // CRITICAL: Roll back raid progress for NON-burn transactions.
-      // RaidBoss = sum(amount) по earn|spend, поэтому удаление даёт delta = -tx.amount.
-      let nextRaid = s.raidProgress ?? 0
+    try {
+      const { error: delErr } = await supabase.from('transactions').delete().eq('id', transactionId)
+      if (delErr) throw delErr
+
+      const user = state.users.find((u) => u.id === tx.userId)
+      const newBalance = Math.max(0, (user?.balance ?? 0) - tx.amount)
+      const newDailyEarned = isEarnToday ? Math.max(0, (user?.daily_points_earned ?? 0) - tx.amount) : undefined
+      const profileUpdate = { balance: newBalance }
+      if (isEarnToday) profileUpdate.daily_points_earned = newDailyEarned
+
+      const { error: profileErr } = await supabase.from('profiles').update(profileUpdate).eq('id', tx.userId)
+      if (profileErr) throw profileErr
+
+      let nextRaid = state.raidProgress ?? 0
       if (tx.type === 'earn' || tx.type === 'spend') {
         nextRaid = Math.max(0, nextRaid - tx.amount)
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(RAID_STORAGE_KEY, String(nextRaid))
-        }
+        const { error: raidErr } = await supabase
+          .from('settings')
+          .upsert({ key: 'raid_progress', value: nextRaid }, { onConflict: 'key' })
+        if (raidErr) console.error('removeTransaction: raid_progress sync failed', raidErr)
       }
 
-      return {
-        users: updatedUsers,
+      set((s) => ({
+        users: s.users.map((u) =>
+          u.id === tx.userId
+            ? { ...u, balance: newBalance, ...(isEarnToday && newDailyEarned != null ? { daily_points_earned: newDailyEarned } : {}) }
+            : u
+        ),
         transactions: (s.transactions ?? []).filter((t) => t.id !== transactionId),
         raidProgress: nextRaid,
+      }))
+      if (typeof localStorage !== 'undefined' && (tx.type === 'earn' || tx.type === 'spend')) {
+        localStorage.setItem(RAID_STORAGE_KEY, String(nextRaid))
       }
-    })
-    
-    if (!isTemp) {
-      ;(async () => {
-        try {
-          await supabase.from('transactions').delete().eq('id', transactionId)
-          const user = get().users.find((u) => u.id === tx.userId)
-          await supabase.from('profiles').update({ balance: Math.max(0, user?.balance ?? 0) }).eq('id', tx.userId)
-
-          // CRITICAL: Sync raid progress rollback to Supabase for NON-burn transactions.
-          if (tx.type === 'earn' || tx.type === 'spend') {
-            const raidProgress = get().raidProgress ?? 0
-            try {
-              await supabase
-                .from('settings')
-                .upsert({ key: 'raid_progress', value: raidProgress }, { onConflict: 'key' })
-            } catch (e) {
-              console.warn('removeTransaction raid_progress sync (optional):', e)
-            }
-          }
-        } catch (e) {
-          console.error('removeTransaction sync:', e)
-        }
-      })()
+    } catch (e) {
+      console.error('removeTransaction: Supabase failed', e)
     }
   },
 
-  purchaseItem: (userId, item) => {
+  purchaseItem: async (userId, item) => {
     const state = get()
     const user = state.users.find((u) => u.id === userId)
     if (!user || user.balance < item.cost) return false
-    get().spendPoints(userId, item.cost, item.name)
+    await get().spendPoints(userId, item.cost, item.name)
     set((s) => ({
       purchases: [...(s.purchases ?? []), { userId, itemId: item.id, itemName: item.name, cost: item.cost, at: Date.now() }],
     }))

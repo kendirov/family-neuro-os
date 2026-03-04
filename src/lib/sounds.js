@@ -1,5 +1,8 @@
 /**
  * Sound effects: browser Audio API with Web Audio fallback when .mp3 missing.
+ *
+ * AudioContext и воспроизведение блокируются браузером до первого взаимодействия
+ * пользователя (click/touch/keydown). Разблокируем при первом клике на document.
  */
 
 const SOUNDS = {
@@ -11,21 +14,68 @@ const SOUNDS = {
 }
 
 let audioContext = null
+let audioUnlocked = false
+
+/**
+ * Разблокировать AudioContext при первом взаимодействии пользователя.
+ * Вызывать из playMp3 (в user gesture) или из глобального listener.
+ * resume() требует user gesture — иначе браузер блокирует.
+ */
+function unlockAudio() {
+  if (audioUnlocked) return
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    if (!audioContext) audioContext = new Ctx()
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
+    }
+    audioUnlocked = true
+  } catch (_) {
+    // Без user gesture resume() может выбросить — игнорируем
+  }
+}
+
+/** Подписаться на первый клик/тап/клавишу для разблокировки аудио. */
+function initUnlockListener() {
+  const unlock = () => {
+    unlockAudio()
+    document.body.removeEventListener('click', unlock)
+    document.body.removeEventListener('touchstart', unlock)
+    document.body.removeEventListener('keydown', unlock)
+  }
+  document.body.addEventListener('click', unlock, { once: true })
+  document.body.addEventListener('touchstart', unlock, { once: true })
+  document.body.addEventListener('keydown', unlock, { once: true })
+}
+
+if (typeof document !== 'undefined' && document.body) {
+  initUnlockListener()
+} else if (typeof window !== 'undefined') {
+  window.addEventListener('DOMContentLoaded', initUnlockListener)
+}
+
 function getContext() {
-  if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)()
+  if (!audioUnlocked || !audioContext) return null
   return audioContext
 }
 
 function playMp3(name, onError) {
-  const audio = new Audio(SOUNDS[name])
-  audio.volume = 0.7
-  if (onError) audio.addEventListener('error', onError)
-  audio.play().catch(() => onError?.())
+  unlockAudio() // Разблокировать при первом вызове из user gesture (click и т.д.)
+  try {
+    const audio = new Audio(SOUNDS[name])
+    audio.volume = 0.7
+    if (onError) audio.addEventListener('error', onError)
+    audio.play().catch(() => onError?.())
+  } catch (_) {
+    onError?.()
+  }
 }
 
 function coinFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
@@ -44,6 +94,7 @@ function coinFallback() {
 function startFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
@@ -63,6 +114,7 @@ function startFallback() {
 function alarmFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const now = ctx.currentTime
     for (let i = 0; i < 5; i++) {
@@ -86,6 +138,7 @@ function alarmFallback() {
 function errorFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -107,6 +160,7 @@ function errorFallback() {
 function engineRevFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -129,6 +183,7 @@ function engineRevFallback() {
 function sirenFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -147,45 +202,55 @@ function sirenFallback() {
   } catch (_) {}
 }
 
+/** Обёртка: воспроизведение не должно крашить приложение. */
+function safePlay(fn) {
+  try {
+    fn()
+  } catch (_) {
+    // Игнорируем — аудио опционально
+  }
+}
+
 /** Positive ding / coin when points added */
 export function playCoin() {
-  playMp3('coin', coinFallback)
+  safePlay(() => playMp3('coin', coinFallback))
 }
 
 /** Chime when a daily mission is completed (placeholder: reuses coin sound). */
 export function playChime() {
-  playMp3('coin', coinFallback)
+  safePlay(() => playMp3('coin', coinFallback))
 }
 
 /** Sci-fi power-up (legacy) */
 export function playStart() {
-  playMp3('start', startFallback)
+  safePlay(() => playMp3('start', startFallback))
 }
 
 /** Engine rev when timer starts */
 export function playEngineRev() {
-  playMp3('start', engineRevFallback)
+  safePlay(() => playMp3('start', engineRevFallback))
 }
 
 /** Alarm when timer ends */
 export function playAlarm() {
-  playMp3('alarm', alarmFallback)
+  safePlay(() => playMp3('alarm', alarmFallback))
 }
 
 /** Error/buzz when penalty */
 export function playError() {
-  playMp3('error', errorFallback)
+  safePlay(() => playMp3('error', errorFallback))
 }
 
 /** Siren once when entering overdrive */
 export function playSiren() {
-  playMp3('siren', sirenFallback)
+  safePlay(() => playMp3('siren', sirenFallback))
 }
 
 /** Cash register / deduct sound when session finishes */
 function cashRegisterFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const now = ctx.currentTime
     const osc1 = ctx.createOscillator()
@@ -216,13 +281,14 @@ function cashRegisterFallback() {
 }
 
 export function playCashRegister() {
-  playMp3('coin', cashRegisterFallback)
+  safePlay(() => playMp3('coin', cashRegisterFallback))
 }
 
 /** Very quiet tick when 1 XP is deducted each minute (burn cycle complete). */
 function burnTickFallback() {
   try {
     const ctx = getContext()
+    if (!ctx) return
     if (ctx.state === 'suspended') ctx.resume()
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -240,5 +306,5 @@ function burnTickFallback() {
 }
 
 export function playBurnTick() {
-  burnTickFallback()
+  safePlay(burnTickFallback)
 }

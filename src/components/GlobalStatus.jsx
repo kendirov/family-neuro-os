@@ -22,7 +22,7 @@ export function GlobalStatus() {
       className="global-status px-4 pt-1 md:px-6"
       aria-label="Общий накопитель энергии"
     >
-      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/80 bg-slate-950/85 px-3 py-2 shadow-[0_4px_18px_rgba(0,0,0,0.7)]">
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 backdrop-blur-xl px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)]">
         {/* Left: Kirill */}
         {kirill && (
           <div className="flex items-center gap-2 min-w-0">
@@ -35,7 +35,7 @@ export function GlobalStatus() {
                 <span className="text-xs" aria-hidden>
                   🟣
                 </span>
-                <span className="font-lcd text-sm sm:text-base font-bold tabular-nums text-purple-200 drop-shadow-[0_0_10px_rgba(192,132,252,0.9)]">
+                <span className="font-turbo-nums text-sm sm:text-base font-bold text-purple-200 drop-shadow-[0_0_10px_rgba(192,132,252,0.9)]">
                   TOTAL: {kirill.balance ?? 0} XP
                 </span>
               </div>
@@ -58,7 +58,7 @@ export function GlobalStatus() {
                 РОМА
               </span>
               <div className="flex items-baseline gap-1">
-                <span className="font-lcd text-sm sm:text-base font-bold tabular-nums text-cyan-200 drop-shadow-[0_0_10px_rgba(56,189,248,0.9)]">
+                <span className="font-turbo-nums text-sm sm:text-base font-bold text-cyan-200 drop-shadow-[0_0_10px_rgba(56,189,248,0.9)]">
                   TOTAL: {roma.balance ?? 0} XP
                 </span>
                 <span className="text-xs" aria-hidden>

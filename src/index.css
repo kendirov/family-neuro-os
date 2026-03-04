@@ -1,7 +1,5 @@
 @import '@fontsource-variable/geist-mono';
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Russo+One&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -9,13 +7,13 @@
 
 @layer base {
   :root {
-    --font-geist-mono: 'Geist Mono', 'Courier Prime', ui-monospace, monospace;
-    --font-lcd: 'Orbitron', 'Geist Mono', ui-monospace, monospace;
-    --font-blocky: 'Bangers', 'Orbitron', sans-serif;
-    /* Gaming headers (Orbitron / Russo One) */
-    --font-gaming: 'Russo One', 'Orbitron', system-ui, sans-serif;
-    /* Data / body (Inter, Roboto) */
-    --font-sans-data: 'Inter', 'Roboto', system-ui, sans-serif;
+    --font-geist-mono: 'Geist Mono', 'SF Mono', ui-monospace, monospace;
+    /* Expensive Minimalism: clean sans-serif (Inter / SF Pro) */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    --font-sans-data: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    /* Legacy: fallback */
+    --font-gaming: 'Inter', system-ui, sans-serif;
+    --font-lcd: 'Geist Mono', ui-monospace, monospace;
     /* Expensive Minimalism: Deep slate/black */
     --background: 222 47% 6%;
     --foreground: 0 0% 98%;
@@ -51,13 +49,18 @@
   }
 }
 
-/* Gaming headers: use .font-gaming for ROMA / KIRILL and section titles */
+/* Expensive Minimalism: typography */
 .font-gaming {
   font-family: var(--font-gaming);
   letter-spacing: 0.04em;
 }
 .font-sans-data {
   font-family: var(--font-sans-data);
+}
+/* Turbo Coins / numbers: prominent, tabular */
+.font-turbo-nums {
+  font-family: var(--font-geist-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Juicy: drop-shadow so text and icons pop off dark background */
@@ -239,45 +242,23 @@
     background: radial-gradient(ellipse 120% 80% at 50% 0%, rgb(15 23 42) 0%, rgb(59 7 100) 40%, rgb(15 23 42) 100%);
   }
 
-  /* Turbo Garage: Dark asphalt / carbon fiber base + radial focus */
+  /* Expensive Minimalism: deep slate-950 */
   .bg-turbo-garage {
-    background-color: #0c0f14;
-    background-image:
-      /* Carbon fiber weave: diagonal stripes */
-      repeating-linear-gradient(
-        127deg,
-        transparent 0,
-        transparent 1px,
-        rgba(0, 0, 0, 0.35) 1px,
-        rgba(0, 0, 0, 0.35) 2px
-      ),
-      repeating-linear-gradient(
-        -37deg,
-        transparent 0,
-        transparent 1px,
-        rgba(0, 0, 0, 0.28) 1px,
-        rgba(0, 0, 0, 0.28) 2px
-      ),
-      /* Dark asphalt grain */
-      radial-gradient(ellipse 100% 100% at 50% 50%, rgba(20, 24, 32, 0.98) 0%, #080a0e 100%);
-    background-size: 100% 100%, 100% 100%, 100% 100%;
-    background-position: 0 0, 0 0, 0 0;
+    background-color: rgb(2 6 23);
   }
 
-  /* Radial gradient to focus on center (slight vignette + center glow) */
+  /* Subtle radial: violet/cyan hint (barely visible) */
   .bg-turbo-garage-radial {
     background: radial-gradient(
-      ellipse 90% 85% at 50% 45%,
-      rgba(34, 211, 238, 0.04) 0%,
-      rgba(168, 85, 247, 0.02) 35%,
+      ellipse 120% 80% at 50% 0%,
+      rgba(139, 92, 246, 0.03) 0%,
+      rgba(34, 211, 238, 0.02) 35%,
       transparent 60%
     );
   }
 
-  /* Carbon fiber / hexagon mesh overlay */
   .bg-turbo-garage-mesh {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='48' viewBox='0 0 56 48'%3E%3Cpath fill='none' stroke='rgba(34,211,238,0.05)' stroke-width='0.5' d='M28 0l28 16v32l-28 16L0 48V16L28 0zm0 8L8 20v24l20 12 20-12V20L28 8z'/%3E%3C/svg%3E");
-    background-size: 56px 48px;
+    background-image: none;
   }
 
   @keyframes toast-in {
@@ -327,6 +308,16 @@
   }
   .animate-wheel-result {
     animation: wheel-result 0.35s ease-out forwards;
+  }
+
+  /* Daily Roulette: scan line during spin */
+  @keyframes daily-roulette-scan {
+    0% { transform: translateY(-100%); opacity: 0; }
+    50% { opacity: 0.4; }
+    100% { transform: translateY(100%); opacity: 0; }
+  }
+  .animate-daily-roulette-scan {
+    animation: daily-roulette-scan 0.5s linear infinite;
   }
 
   @keyframes wheel-modal-enter {
@@ -917,18 +908,17 @@
     }
   }
 
-  /* Juicy HUD panels: rounded-2xl, 3px borders, rich dark blue-grey */
+  /* Expensive Minimalism: glass panels — no solid backgrounds */
   .panel-glass {
     position: relative;
-    border-radius: 1rem; /* 16px — use rounded-2xl in class for 1.5rem */
-    background: linear-gradient(165deg, #1e293b 0%, #0f172a 100%);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 3px solid rgba(100, 116, 139, 0.5);
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.08),
-      0 6px 24px rgba(0, 0, 0, 0.5),
-      0 0 0 1px rgba(0, 0, 0, 0.3);
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 4px 24px rgba(0, 0, 0, 0.25);
   }
   /* Roma: Cyan neon — juicy */
   .panel-glow-roma {
@@ -1025,9 +1015,10 @@
     border-width: 3px;
   }
 
-  /* Score: Credits — bold wide numbers, pop */
+  /* Score: Turbo Coins — prominent tabular numerals */
   .hud-score-total {
-    font-family: var(--font-gaming), var(--font-lcd);
+    font-family: var(--font-geist-mono);
+    font-variant-numeric: tabular-nums;
     font-size: clamp(2rem, 5vw + 1.25rem, 3.5rem);
     font-weight: 900;
     color: #fbbf24;

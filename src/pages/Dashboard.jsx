@@ -28,6 +28,9 @@ import { Wallet, Coins } from 'lucide-react'
 import { WheelOfFortune } from '@/components/WheelOfFortune'
 import { RaidBoss } from '@/components/RaidBoss'
 import { GlobalStatus } from '@/components/GlobalStatus'
+import { PilotHUDGrid } from '@/components/PilotHUD/PilotHUDGrid'
+import { TimerDispatchPanel } from '@/components/TimerDispatchPanel'
+import { AdminControlPanel } from '@/components/AdminControlPanel'
 
 /** Mission tasks from centralized task config (4 phases: Утро, Школа, Питание, Дом и сон). */
 const MISSION_TASKS_BY_CATEGORY = getMissionTasksByCategory()
@@ -70,16 +73,16 @@ function GodModeCommandBar({ roma, kirill, onShowToast, disabled }) {
   // CRITICAL: Maintain order - Kirill first, Roma second
   const userIds = target === 'both' ? [kirill?.id, roma?.id].filter(Boolean) : target === 'roma' ? [roma?.id] : [kirill?.id]
 
-  const handleApply = () => {
+  const handleApply = async () => {
     if (!isValid || userIds.length === 0) return
     const amount = Math.abs(num)
     const reason = num >= 0 ? REASON_BONUS : REASON_FINE
     if (num >= 0) {
-      userIds.forEach((id) => addPoints(id, amount, reason))
+      for (const id of userIds) await addPoints(id, amount, reason)
       playCoin()
       onShowToast?.({ message: `+${amount} — ${userIds.length > 1 ? 'Оба' : userIds[0] === 'roma' ? 'Рома' : 'Кирилл'}`, variant: 'success' })
     } else {
-      userIds.forEach((id) => spendPoints(id, amount, reason))
+      for (const id of userIds) await spendPoints(id, amount, reason)
       playError()
       onShowToast?.({ message: `−${amount} — ${userIds.length > 1 ? 'Оба' : userIds[0] === 'roma' ? 'Рома' : 'Кирилл'}`, variant: 'alert' })
     }
@@ -310,33 +313,20 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
 
   const panelGlow = user.color === 'cyan' ? 'panel-glow-roma' : 'panel-glow-kirill'
 
-  // Solid, vibrant gradients based on pilot theme - NO transparency
-  const columnBgClass = user.color === 'cyan'
-    ? 'bg-gradient-to-b from-cyan-900/90 to-slate-900'
-    : 'bg-gradient-to-b from-purple-900/90 to-slate-900'
   const columnBorderClass = user.color === 'cyan'
-    ? 'border-cyan-500/50 shadow-2xl shadow-cyan-900/20'
-    : 'border-purple-500/50 shadow-2xl shadow-purple-900/20'
+    ? 'border-cyan-500/30'
+    : 'border-purple-500/30'
 
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-3xl border-2 flex flex-1 flex-col min-w-0 min-h-[320px] p-4 sm:p-5',
-        columnBgClass,
+        'relative overflow-hidden rounded-2xl flex flex-1 flex-col min-w-0 min-h-[320px] p-4 sm:p-5',
+        'bg-white/5 backdrop-blur-xl border border-white/10',
+        'shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)]',
         columnBorderClass,
         readOnly && 'cursor-default pointer-events-none'
       )}
     >
-      {/* Header glow effect - subtle spotlight at top */}
-      <div
-        className={cn(
-          'absolute top-0 left-0 right-0 h-32 pointer-events-none',
-          user.color === 'cyan'
-            ? 'bg-gradient-to-b from-cyan-500/20 to-transparent'
-            : 'bg-gradient-to-b from-purple-500/20 to-transparent'
-        )}
-        aria-hidden
-      />
       {/* Header: Pixel art avatar + name + Wallet (Quick Calculator) trigger */}
           <div className="flex items-center justify-between gap-3 sm:gap-4 mb-3 shrink-0 relative z-10">
         <div className="relative shrink-0">
@@ -392,7 +382,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
         const todayEarnedLabel = `${todayEarned >= 0 ? '+' : ''}${todayEarned}`
         const dailySummary = getDailySummary()
         return (
-          <div className="mb-3 shrink-0 rounded-2xl border-[3px] border-slate-500/70 bg-slate-800/90 px-4 py-4 shadow-[0_4px_16px_rgba(0,0,0,0.6)] relative z-10">
+          <div className="mb-3 shrink-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_16px_rgba(0,0,0,0.25)] relative z-10">
             <div className="flex flex-col gap-2">
               <div className="flex flex-col items-center">
                 <span className="font-sans-data text-[10px] text-white uppercase tracking-wider font-semibold">
@@ -478,7 +468,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
 
       {/* Transaction History — Admin mode: expanded list for today's transactions */}
       {isCommander ? (
-        <div className="mt-3 flex flex-col rounded-2xl border-2 border-slate-500/70 bg-slate-800/90 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.5)] h-auto relative z-10">
+        <div className="mt-3 flex flex-col rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_16px_rgba(0,0,0,0.25)] h-auto relative z-10">
           <h3 className="font-mono text-sm text-white uppercase tracking-wider px-4 py-3 border-b border-slate-600/60 shrink-0 font-bold">
             Журнал операций — Сегодня
           </h3>
@@ -550,7 +540,7 @@ function SupplyDepotColumn({ user, onShowToast, locked, readOnly, juicy, isComma
           </div>
         </div>
       ) : (
-        <div className="mt-3 flex-1 flex flex-col rounded-2xl border-2 border-slate-500/70 bg-slate-800/90 overflow-hidden shadow-[0_4px_12px_rgba(0,0,0,0.5)] min-h-[400px] relative z-10">
+        <div className="mt-3 flex-1 flex flex-col rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_16px_rgba(0,0,0,0.25)] min-h-[400px] relative z-10">
           <h3 className="font-mono text-xs text-white uppercase tracking-wider px-3 py-2 border-b border-slate-600/60 shrink-0 font-bold">
             Журнал операций
           </h3>
@@ -1079,6 +1069,12 @@ export function Dashboard({ mode = 'pilot' }) {
   const transactions = useAppStore((s) => s.transactions ?? [])
   const removeTransaction = useAppStore((s) => s.removeTransaction)
   const panelLocked = useAppStore((s) => s.panelLocked)
+  const addPoints = useAppStore((s) => s.addPoints)
+  const spendPoints = useAppStore((s) => s.spendPoints)
+  const markDailyBaseComplete = useAppStore((s) => s.markDailyBaseComplete)
+  const isDailyBaseComplete = useAppStore((s) => s.isDailyBaseComplete)
+  const undoDailyTask = useAppStore((s) => s.undoDailyTask)
+  const purchaseItem = useAppStore((s) => s.purchaseItem)
   // CRITICAL: Ensure correct order - Kirill first, Roma second
   const kirill = users.find((u) => u.id === 'kirill')
   const roma = users.find((u) => u.id === 'roma')
@@ -1128,16 +1124,18 @@ export function Dashboard({ mode = 'pilot' }) {
   return (
     <KioskLayout>
       <Header />
-      <GlobalStatus />
-      {/* Weekly flight plan header: 5-day grid schedule */}
-      <div className="px-4 pt-2 md:px-6">
-        <div className="rounded-2xl border-2 border-slate-700/80 bg-slate-900/70 shadow-[0_4px_18px_rgba(0,0,0,0.5)] px-3 py-3 sm:px-4 sm:py-3">
-          <h2 className="font-mono text-[10px] sm:text-[11px] text-slate-400 uppercase tracking-[0.2em] mb-2">
-            ПОЛЁТНЫЙ ПЛАН — 5 ДНЕЙ
-          </h2>
-          <WallSchedule />
+      {isCommander && <GlobalStatus />}
+      {/* Weekly flight plan — только в режиме командира; пилоты видят Timeline в HUD */}
+      {isCommander && (
+        <div className="px-4 pt-2 md:px-6">
+          <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)] px-3 py-3 sm:px-4 sm:py-3">
+            <h2 className="font-mono text-[10px] sm:text-[11px] text-slate-400 uppercase tracking-[0.2em] mb-2">
+              ПОЛЁТНЫЙ ПЛАН — 5 ДНЕЙ
+            </h2>
+            <WallSchedule />
+          </div>
         </div>
-      </div>
+      )}
       <main className="dashboard-grid flex-1 min-h-0 flex flex-col overflow-y-auto p-4">
         {/* 2-column grid: Left = Pilots, Right = Control Center */}
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden gap-4">
@@ -1161,43 +1159,100 @@ export function Dashboard({ mode = 'pilot' }) {
               </button>
             )}
           </div>
-          {isCommander && false && (
+          {isCommander && (
             <GodModeCommandBar
               roma={roma}
               kirill={kirill}
               onShowToast={setToast}
-              disabled={false}
+              disabled={panelLocked}
             />
           )}
           <div className="flex flex-col lg:flex-row flex-1 gap-3 min-h-0 min-w-0 overflow-y-auto mt-2">
-            {/* CRITICAL: Kirill LEFT, Roma RIGHT — always show two columns (real or placeholder) */}
-            {kirill ? (
-              <SupplyDepotColumn
-                user={kirill}
-                onShowToast={setToast}
-                locked={isCommander ? false : panelLocked}
-                readOnly={isPilot}
-                juicy={isCommander}
-                isCommander={isCommander}
-                transactions={transactions}
-                onRemoveTransaction={handleRemoveTransaction}
-              />
+            {/* Pilot mode: Bento HUD. Commander: Admin Control Panel (Bento). */}
+            {isPilot ? (
+              <>
+                {kirill ? (
+                  <div className="flex-1 min-w-0 rounded-2xl border-2 border-purple-500/30 bg-white/5 backdrop-blur-xl overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)]">
+                    <PilotHUDGrid
+                      user={kirill}
+                      onTaskComplete={(task) => {
+                        const amt = Math.abs(task.credits ?? 0)
+                        if (task.credits >= 0) {
+                          addPoints(kirill.id, amt, task.reason)
+                          playChime()
+                          setToast({ message: `+${amt} — ${task.label}`, variant: 'success' })
+                        } else {
+                          spendPoints(kirill.id, amt, task.reason)
+                          playError()
+                          setToast({ message: `−${amt} — ${task.label}`, variant: 'alert' })
+                        }
+                        if (task.isDaily) markDailyBaseComplete(kirill.id, task.id)
+                      }}
+                      onPurchase={(item) => {
+                        const ok = purchaseItem(kirill.id, item)
+                        if (ok) {
+                          playCoin()
+                          setToast({ message: `${item.name} куплено!`, variant: 'success' })
+                        } else {
+                          playError()
+                          setToast({ message: 'Недостаточно XP', variant: 'alert' })
+                        }
+                      }}
+                      disabled={panelLocked}
+                    />
+                  </div>
+                ) : (
+                  <PilotColumnPlaceholder label="Кирилл" theme="purple" />
+                )}
+                {roma ? (
+                  <div className="flex-1 min-w-0 rounded-2xl border-2 border-cyan-500/30 bg-white/5 backdrop-blur-xl overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)]">
+                    <PilotHUDGrid
+                      user={roma}
+                      onTaskComplete={(task) => {
+                        const amt = Math.abs(task.credits ?? 0)
+                        if (task.credits >= 0) {
+                          addPoints(roma.id, amt, task.reason)
+                          playChime()
+                          setToast({ message: `+${amt} — ${task.label}`, variant: 'success' })
+                        } else {
+                          spendPoints(roma.id, amt, task.reason)
+                          playError()
+                          setToast({ message: `−${amt} — ${task.label}`, variant: 'alert' })
+                        }
+                        if (task.isDaily) markDailyBaseComplete(roma.id, task.id)
+                      }}
+                      onPurchase={(item) => {
+                        const ok = purchaseItem(roma.id, item)
+                        if (ok) {
+                          playCoin()
+                          setToast({ message: `${item.name} куплено!`, variant: 'success' })
+                        } else {
+                          playError()
+                          setToast({ message: 'Недостаточно XP', variant: 'alert' })
+                        }
+                      }}
+                      disabled={panelLocked}
+                    />
+                  </div>
+                ) : (
+                  <PilotColumnPlaceholder label="Рома" theme="cyan" />
+                )}
+              </>
             ) : (
-              <PilotColumnPlaceholder label="Кирилл" theme="purple" />
-            )}
-            {roma ? (
-              <SupplyDepotColumn
-                user={roma}
-                onShowToast={setToast}
-                locked={isCommander ? false : panelLocked}
-                readOnly={isPilot}
-                juicy={isCommander}
-                isCommander={isCommander}
-                transactions={transactions}
-                onRemoveTransaction={handleRemoveTransaction}
-              />
-            ) : (
-              <PilotColumnPlaceholder label="Рома" theme="cyan" />
+              <div className="flex-1 min-w-0 flex flex-col min-h-0 rounded-2xl border border-white/10 bg-slate-950/60 backdrop-blur-xl overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)] p-4">
+                <AdminControlPanel
+                  roma={roma}
+                  kirill={kirill}
+                  transactions={transactions}
+                  onShowToast={setToast}
+                  onRemoveTransaction={handleRemoveTransaction}
+                  addPoints={addPoints}
+                  spendPoints={spendPoints}
+                  markDailyBaseComplete={markDailyBaseComplete}
+                  isDailyBaseComplete={isDailyBaseComplete}
+                  undoDailyTask={undoDailyTask}
+                />
+              </div>
             )}
           </div>
         </section>
@@ -1219,6 +1274,9 @@ export function Dashboard({ mode = 'pilot' }) {
           <span className="panel-bolt bolt-br" aria-hidden />
           <h2 className="font-gaming text-base text-slate-400 mb-3 shrink-0 uppercase tracking-wider">ЦЕНТР УПРАВЛЕНИЯ</h2>
           <div className="flex flex-1 flex-col gap-4 min-h-0 overflow-auto">
+            {isCommander && (
+              <TimerDispatchPanel onShowToast={setToast} />
+            )}
             <RaidBoss isCommander={isCommander} />
             <ControlCenter
               wheelPilot={wheelPilot}
