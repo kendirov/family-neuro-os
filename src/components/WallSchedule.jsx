@@ -1,34 +1,10 @@
+import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
+import { useScheduleStore } from '@/stores/useScheduleStore'
 
-/**
- * Full-week timetable. Keys 1 (Mon) .. 5 (Fri).
- * Roma: 1-я смена 08:00, 5 lessons/day. Kirill: 2-я смена 13:20, 4 lessons/day.
- */
-const WEEKLY_SCHEDULE = {
-  1: {
-    roma: ['Алгебра', 'Русский', 'Физра', 'Английский', 'Физика'],
-    kirill: ['Окр. мир', 'Матем', 'Чтение', 'ИЗО'],
-  },
-  2: {
-    roma: ['Русский', 'Алгебра', 'Литература', 'Физра', 'Английский'],
-    kirill: ['Матем', 'Окр. мир', 'Чтение', 'ИЗО'],
-  },
-  3: {
-    roma: ['Физика', 'Алгебра', 'Русский', 'Английский', 'Физра'],
-    kirill: ['Чтение', 'Матем', 'Окр. мир', 'ИЗО'],
-  },
-  4: {
-    roma: ['Английский', 'Русский', 'Алгебра', 'Литература', 'Физика'],
-    kirill: ['ИЗО', 'Матем', 'Чтение', 'Окр. мир'],
-  },
-  5: {
-    roma: ['Литература', 'Алгебра', 'Русский', 'Английский', 'Физра'],
-    kirill: ['Окр. мир', 'Матем', 'Чтение', 'ИЗО'],
-  },
-}
-
+/** getDay(): 1=Mon .. 5=Fri -> day key */
+const DAY_NUM_TO_KEY = { 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri' }
 const DAY_LABELS = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ']
-const MAX_ROWS = 5
 
 function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
   const isPurple = accent === 'purple'
@@ -99,15 +75,25 @@ function SchedulePanel({ title, accent, scheduleByDay, currentDay }) {
 }
 
 export function WallSchedule() {
+  const schedule = useScheduleStore((s) => s.schedule)
   const today = new Date().getDay()
   const currentDay = today >= 1 && today <= 5 ? today : null
 
-  const romaByDay = {}
-  const kirillByDay = {}
-  for (let d = 1; d <= 5; d++) {
-    romaByDay[d] = WEEKLY_SCHEDULE[d].roma
-    kirillByDay[d] = WEEKLY_SCHEDULE[d].kirill
-  }
+  const { romaByDay, kirillByDay } = useMemo(() => {
+    const romaByDay = {}
+    const kirillByDay = {}
+    for (let d = 1; d <= 5; d++) {
+      const key = DAY_NUM_TO_KEY[d]
+      if (schedule[key]) {
+        romaByDay[d] = schedule[key].roma.map((s) => s.subject)
+        kirillByDay[d] = schedule[key].kirill.map((s) => s.subject)
+      } else {
+        romaByDay[d] = []
+        kirillByDay[d] = []
+      }
+    }
+    return { romaByDay, kirillByDay }
+  }, [schedule])
 
   return (
     <section

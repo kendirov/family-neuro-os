@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
-import { WEEKLY_SCHEDULE, DAY_KEYS, DAY_LABELS, getScheduleKey } from '@/data/weeklySchedule'
+import { DAY_KEYS, DAY_LABELS, getScheduleKey } from '@/data/weeklySchedule'
+import { useScheduleStore } from '@/stores/useScheduleStore'
 
 /** "HH:mm" -> minutes since midnight */
 function timeToMinutes(str) {
@@ -115,10 +116,12 @@ export function SchoolSchedule() {
     return () => clearInterval(id)
   }, [])
 
+  const schedule = useScheduleStore((s) => s.schedule)
   const scheduleKey = getScheduleKey(selectedDay)
-  const daySchedule = scheduleKey ? WEEKLY_SCHEDULE[scheduleKey] : null
-  const romaLessons = daySchedule?.roma ?? []
-  const kirillLessons = daySchedule?.kirill ?? []
+  const daySchedule = scheduleKey ? schedule[scheduleKey] : null
+  const toLegacy = (slots) => (slots ?? []).map((s) => ({ start: s.startTime, end: s.endTime, name: s.subject }))
+  const romaLessons = toLegacy(daySchedule?.roma)
+  const kirillLessons = toLegacy(daySchedule?.kirill)
 
   return (
     <section

@@ -1,7 +1,8 @@
 /**
  * Утилиты для Pilot HUD: текущая задача по времени, таймлайн дня.
  */
-import { WEEKLY_SCHEDULE, getScheduleKey } from '@/data/weeklySchedule'
+import { getScheduleKey } from '@/data/weeklySchedule'
+import { useScheduleStore } from '@/stores/useScheduleStore'
 import { TASK_CONFIG } from '@/data/taskConfig'
 
 /** Временные слоты для задач (приблизительно). */
@@ -21,8 +22,9 @@ export function getCurrentFocus(now, pilotId, isDailyBaseComplete) {
   const dayKey = getScheduleKey(now.getDay())
 
   // Школа: текущий урок по расписанию
-  if (dayKey && WEEKLY_SCHEDULE[dayKey]) {
-    const lessons = WEEKLY_SCHEDULE[dayKey][pilotId] ?? []
+  const legacySchedule = useScheduleStore.getState().getLegacySchedule()
+  if (dayKey && legacySchedule[dayKey]) {
+    const lessons = legacySchedule[dayKey][pilotId] ?? []
     const isRoma = pilotId === 'roma'
     const schoolStart = isRoma ? 8 : 13.33 // 13:20
     const schoolEnd = isRoma ? 13 : 18
@@ -85,8 +87,9 @@ export function getTodayTimeline(now, pilotId) {
   const events = []
   const isRoma = pilotId === 'roma'
 
-  if (dayKey && WEEKLY_SCHEDULE[dayKey]) {
-    const lessons = WEEKLY_SCHEDULE[dayKey][pilotId] ?? []
+  const legacySchedule = useScheduleStore.getState().getLegacySchedule()
+  if (dayKey && legacySchedule[dayKey]) {
+    const lessons = legacySchedule[dayKey][pilotId] ?? []
     const startHour = isRoma ? 8 : 13.33
     lessons.forEach((lesson, i) => {
       const start = startHour + i * (45 / 60 + 15 / 60)

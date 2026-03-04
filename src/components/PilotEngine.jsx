@@ -73,7 +73,12 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
   )
 
   // Keep display in sync: current session only (reset to 00:00 when stopped)
+  // Если родитель передаёт propElapsedSeconds (например из active_timers), используем его
   useEffect(() => {
+    if (propElapsedSeconds !== undefined && propElapsedSeconds !== null) {
+      setDisplayElapsedSeconds(propElapsedSeconds)
+      return
+    }
     if (!pilot) {
       setDisplayElapsedSeconds(0)
       return
@@ -88,9 +93,11 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
       }
     }, 1000)
     return () => clearInterval(interval)
-  }, [pilot?.timerStatus, pilot?.timerStartAt, pilot?.sessionElapsed, pilot?.pausedSegmentSeconds, id])
+  }, [propElapsedSeconds, pilot?.timerStatus, pilot?.timerStartAt, pilot?.sessionElapsed, pilot?.pausedSegmentSeconds, id])
 
-  const elapsedSeconds = displayElapsedSeconds
+  const elapsedSeconds = propElapsedSeconds !== undefined && propElapsedSeconds !== null
+    ? propElapsedSeconds
+    : displayElapsedSeconds
 
   const config = PILOT_CONFIG[id] ?? PILOT_CONFIG.roma
   const { name, glowClass, textClass, bgGlow } = config

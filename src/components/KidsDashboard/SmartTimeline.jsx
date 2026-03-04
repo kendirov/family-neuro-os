@@ -4,7 +4,8 @@
  */
 import { useMemo, useState, useEffect } from 'react'
 import { Check } from 'lucide-react'
-import { WEEKLY_SCHEDULE, getScheduleKey } from '@/data/weeklySchedule'
+import { getScheduleKey } from '@/data/weeklySchedule'
+import { useScheduleStore } from '@/stores/useScheduleStore'
 import { cn } from '@/lib/utils'
 
 /** Парсит "HH:MM" в минуты с полуночи. */
@@ -28,15 +29,21 @@ export function SmartTimeline({ childId, accentColor = 'cyan' }) {
     return () => clearInterval(id)
   }, [])
 
+  const schedule = useScheduleStore((s) => s.schedule)
+
   const { lessons } = useMemo(() => {
     const day = new Date().getDay()
     const key = getScheduleKey(day)
     if (!key) return { lessons: [] }
 
-    const daySchedule = WEEKLY_SCHEDULE[key]
+    const daySchedule = schedule[key]
     if (!daySchedule) return { lessons: [] }
 
-    const list = daySchedule[childId] ?? []
+    const list = (daySchedule[childId] ?? []).map((s) => ({
+      start: s.startTime,
+      end: s.endTime,
+      name: s.subject,
+    }))
     const currentMin = now
 
     const withStatus = list.map((lesson) => {
@@ -52,7 +59,7 @@ export function SmartTimeline({ childId, accentColor = 'cyan' }) {
     })
 
     return { lessons: withStatus }
-  }, [childId, now])
+  }, [childId, now, schedule])
 
   const isPurple = accentColor === 'purple'
   const accentBorder = isPurple ? 'border-purple-500/50' : 'border-cyan-500/50'

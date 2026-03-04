@@ -7,6 +7,12 @@ import { cn } from '@/lib/utils'
 import { PilotEngine } from '@/components/PilotEngine'
 import { WheelBanner } from '@/components/WheelBanner'
 import { ConsumptionWidget } from '@/components/ConsumptionWidget'
+import { useRealtimeTimer } from '@/hooks/useRealtimeTimer'
+import {
+  startActiveTimer,
+  pauseActiveTimer,
+  stopActiveTimer,
+} from '@/lib/activeTimersService'
 
 const MODES = [
   { id: 'game', label: 'ИГРЫ', Icon: Gamepad2, color: 'blue', emoji: '🎮' },
@@ -323,56 +329,113 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
   const addGamingMinutesToday = useAppStore((s) => s.addGamingMinutesToday)
 
   const [mode, setMode] = useState('game')
+  const [target, setTarget] = useState('both') // 'roma' | 'kirill' | 'both'
   const [tick, setTick] = useState(0)
   const [sessionCreditsBurned, setSessionCreditsBurned] = useState(0)
+  const [actionPending, setActionPending] = useState(false)
 
   const lastDeductedMinuteRef = useRef({ roma: 0, kirill: 0 })
   const intervalRef = useRef(null)
 
-  const anyRunning = (pilots?.roma?.status === 'RUNNING') || (pilots?.kirill?.status === 'RUNNING')
+  // active_timers: live-состояние из Supabase Realtime
+  // Используем режим пилота при активной сессии, иначе выбранный mode
+  const romaActivityMode = pilots?.roma?.mode ?? mode
+  const kirillActivityMode = pilots?.kirill?.mode ?? mode
+  const romaTimer = useRealtimeTimer('roma', romaActivityMode)
+  const kirillTimer = useRealtimeTimer('kirill', kirillActivityMode)
 
-  /** Calculate elapsed seconds from server-authoritative timer state.
-   * IF timer_status === 'running': VisualTime = seconds_accumulated_today + (NOW - timer_start_at)
-   * IF timer_status === 'paused': VisualTime = seconds_accumulated_today
-   */
-  const calculateElapsedSeconds = (pilot) => {
-    if (!pilot || pilot.timerStatus === 'idle') return 0
-    
-    const accumulated = pilot.secondsAccumulatedToday ?? 0
-    
-    if (pilot.timerStatus === 'running' && pilot.timerStartAt) {
-      const now = Date.now()
-      const startMs = new Date(pilot.timerStartAt).getTime()
-      const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
-      return accumulated + currentSegmentSeconds
-    }
-    
-    // Paused: just return accumulated seconds
-    return accumulated
+  const romaElapsedSeconds = romaTimer.displaySeconds
+  const kirillElapsedSeconds = kirillTimer.displaySeconds
+
+  const anyRunning =
+    (pilots?.roma?.status === 'RUNNING') || (pilots?.kirill?.status === 'RUNNING')
+
+  const targetIds = target === 'both' ? PILOT_IDS : [target]
+
+  // Состояние кнопок из active_timers (приоритет) + store (fallback)
+  const getTimerStatus = (id) => {
+    const t = id === 'roma' ? romaTimer : kirillTimer
+    if (t.row?.status) return t.row.status
+    const p = pilots?.[id]
+    if (p?.status === 'RUNNING') return 'playing'
+    if (p?.status === 'PAUSED') return 'paused'
+    return 'stopped'
   }
-  
-  const romaElapsedSeconds = calculateElapsedSeconds(pilots?.roma)
-  const kirillElapsedSeconds = calculateElapsedSeconds(pilots?.kirill)
 
-  const startBoth = () => {
-    const bothCanStart =
-      users.find((u) => u.id === 'roma')?.balance >= 1 && users.find((u) => u.id === 'kirill')?.balance >= 1
-    if (!bothCanStart) {
+  const anyTargetPlaying = targetIds.some((id) => getTimerStatus(id) === 'playing')
+  const anyTargetPaused = targetIds.some((id) => getTimerStatus(id) === 'paused')
+
+  const canStart = targetIds.every((id) => (users.find((u) => u.id === id)?.balance ?? 0) >= 1)
+  const canPause = anyTargetPlaying
+  const canStop = anyTargetPlaying || anyTargetPaused
+
+  const startSelected = async () => {
+    if (!canStart || actionPending) {
       playError()
       return
     }
+    setActionPending(true)
     playEngineRev()
-    startEngineStore('roma', mode)
-    startEngineStore('kirill', mode)
-    lastDeductedMinuteRef.current = { roma: 0, kirill: 0 }
-    setSessionCreditsBurned(0)
+    try {
+      for (const id of targetIds) {
+        await startActiveTimer(id, mode)
+        startEngineStore(id, mode)
+      }
+      lastDeductedMinuteRef.current = { roma: 0, kirill: 0 }
+      setSessionCreditsBurned(0)
+    } catch (e) {
+      console.error('startActiveTimer:', e)
+      playError()
+      setLastOfflineSyncToast({ message: 'Ошибка старта таймера. Проверьте консоль (F12).' })
+    } finally {
+      setActionPending(false)
+    }
   }
 
-  const pauseAll = () => {
-    PILOT_IDS.forEach((id) => {
-      if (pilots?.[id]?.status !== 'RUNNING') return
-      pauseEngineStore(id)
-    })
+  const pauseSelected = async () => {
+    if (!canPause || actionPending) return
+    setActionPending(true)
+    try {
+      for (const id of targetIds) {
+        const t = id === 'roma' ? romaTimer : kirillTimer
+        if (t.row?.status === 'playing') {
+          await pauseActiveTimer(id, t.row.activity_type ?? mode, t.row)
+          pauseEngineStore(id)
+        }
+      }
+    } catch (e) {
+      console.error('pauseActiveTimer:', e)
+      playError()
+      setLastOfflineSyncToast({ message: 'Ошибка паузы. Проверьте консоль (F12).' })
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  const stopSelected = async () => {
+    if (!canStop || actionPending) return
+    setActionPending(true)
+    playCashRegister()
+    try {
+      for (const id of targetIds) {
+        const t = id === 'roma' ? romaTimer : kirillTimer
+        const status = getTimerStatus(id)
+        if (status === 'playing' || status === 'paused') {
+          const activityType = t.row?.activity_type ?? mode
+          await stopActiveTimer(id, activityType, t.row, (pilotName, actType, elapsedMinutes) => {
+            addGamingMinutesToday(elapsedMinutes, actType, [pilotName])
+          })
+          stopEngineStore(id)
+        }
+      }
+      lastDeductedMinuteRef.current = { roma: 0, kirill: 0 }
+    } catch (e) {
+      console.error('stopActiveTimer:', e)
+      playError()
+      setLastOfflineSyncToast({ message: 'Ошибка остановки. Проверьте консоль (F12).' })
+    } finally {
+      setActionPending(false)
+    }
   }
 
   // Callbacks for PilotEngine (no longer need local state management)
@@ -519,34 +582,36 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
     })
   }, [pilots?.roma?.sessionMinutes, pilots?.roma?.status, pilots?.kirill?.sessionMinutes, pilots?.kirill?.status, pilots?.roma?.sessionBalanceAtStart, pilots?.kirill?.sessionBalanceAtStart, updateSessionBurn, stopEngineStore, updateLastBurnAt, setLastOfflineSyncToast])
 
-  const bothCanStart =
-    users.find((u) => u.id === 'roma')?.balance >= 1 && users.find((u) => u.id === 'kirill')?.balance >= 1
-
   // Small realtime sync indicator (multi-device timer sync)
   const realtimeStatus = useAppStore((s) => s.realtimeStatus)
 
-  let syncLabel = 'Оффлайн'
-  let syncClasses = 'border-slate-600 text-slate-500'
-  let dotClasses = 'bg-slate-500'
+  const syncDotConnected = realtimeStatus === 'connected'
+  const syncDotOffline = realtimeStatus === 'error' || realtimeStatus === 'idle'
 
-  if (realtimeStatus === 'connecting') {
-    syncLabel = 'Подключение...'
-    syncClasses = 'border-amber-500/60 text-amber-300'
-    dotClasses = 'bg-amber-400 animate-pulse'
-  } else if (realtimeStatus === 'connected') {
-    syncLabel = 'Синхронизировано'
-    syncClasses = 'border-emerald-500/60 text-emerald-300'
-    // Green pulsing dot as requested
-    dotClasses = 'bg-emerald-400 animate-pulse'
-  } else if (realtimeStatus === 'error') {
-    syncLabel = 'Нет связи'
-    syncClasses = 'border-red-500/70 text-red-300'
-    dotClasses = 'bg-red-500 animate-pulse'
-  }
+  const TARGET_OPTIONS = [
+    { id: 'kirill', label: 'Кирилл', accent: 'purple' },
+    { id: 'roma', label: 'Рома', accent: 'cyan' },
+    { id: 'both', label: 'Оба', accent: 'slate' },
+  ]
 
   return (
-    <div className="rounded-2xl border-[3px] border-slate-600 bg-slate-800/95 p-3 sm:p-4 shrink-0 flex flex-col gap-3 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
-      {/* Wheel of Fortune — banner always clickable; opens wheel or pilot selector */}
+    <div className="relative rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-xl p-3 sm:p-4 shrink-0 flex flex-col gap-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.35)]">
+      {/* Sync Status: tiny pulsing dot in top-right corner */}
+      <div
+        className="absolute top-3 right-3 flex items-center gap-1.5"
+        title={realtimeStatus === 'connected' ? 'Синхронизировано' : realtimeStatus === 'error' ? 'Нет связи' : realtimeStatus === 'connecting' ? 'Подключение...' : 'Оффлайн'}
+      >
+        <span
+          className={cn(
+            'w-2 h-2 rounded-full shrink-0',
+            realtimeStatus === 'connected' && 'bg-emerald-400 sync-dot-connected shadow-[0_0_8px_rgba(16,185,129,0.8)]',
+            realtimeStatus === 'connecting' && 'bg-amber-400 animate-pulse shadow-[0_0_6px_rgba(251,191,36,0.6)]',
+            (realtimeStatus === 'error' || realtimeStatus === 'idle' || !realtimeStatus) && 'bg-red-500/90 sync-dot-offline'
+          )}
+        />
+      </div>
+
+      {/* Wheel of Fortune — banner always clickable */}
       {typeof setWheelOpen === 'function' && (
         <WheelBanner
           wheelPilot={wheelPilot}
@@ -555,26 +620,47 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         />
       )}
 
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-gaming text-xs text-slate-400 uppercase tracking-wider">
-          Двигатель сгорания
-        </h3>
-        <div
-          className={cn(
-            'flex items-center gap-1.5 rounded-full px-2 py-0.5 border text-[9px] font-mono uppercase tracking-wider',
-            'bg-slate-900/70',
-            syncClasses
-          )}
-        >
-          <span className={cn('w-1.5 h-1.5 rounded-full', dotClasses)} />
-          <span>{syncLabel}</span>
+      <h3 className="font-gaming text-xs text-slate-400 uppercase tracking-wider pr-8">
+        Двигатель сгорания
+      </h3>
+
+      {/* 1. Target Selection */}
+      <div className="space-y-1.5">
+        <span className="font-mono text-[9px] text-slate-500 uppercase tracking-widest block">
+          Цель
+        </span>
+        <div className="flex gap-px rounded-xl border border-white/10 bg-slate-950/80 p-0.5">
+          {TARGET_OPTIONS.map((opt) => {
+            const isSelected = target === opt.id
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setTarget(opt.id)}
+                className={cn(
+                  'flex-1 min-h-[40px] font-mono text-[10px] font-bold uppercase tracking-wider transition-all touch-manipulation',
+                  isSelected
+                    ? opt.accent === 'cyan'
+                      ? 'bg-cyan-500/25 text-cyan-200 border border-cyan-400/60 shadow-[inset_0_0_20px_rgba(34,211,238,0.15),0_0_12px_rgba(34,211,238,0.3)]'
+                      : opt.accent === 'purple'
+                        ? 'bg-purple-500/25 text-purple-200 border border-purple-400/60 shadow-[inset_0_0_20px_rgba(168,85,247,0.15),0_0_12px_rgba(168,85,247,0.3)]'
+                        : 'bg-white/15 text-white border border-white/25 shadow-[inset_0_0_16px_rgba(255,255,255,0.08),0_0_8px_rgba(255,255,255,0.1)]'
+                  : 'text-slate-500 border border-transparent hover:bg-white/5 hover:text-slate-300'
+                )}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {/* Master controls: Large mode toggles + ЗАПУСТИТЬ ОБОИХ (зелёный) + ПАУЗА ВСЕМ (жёлтый) */}
-      <div className="flex flex-col gap-2.5 py-2 border-b border-slate-600/60">
-        {/* Large Mode Toggles: Games vs Media (sliding pill) */}
-        <div className="relative rounded-2xl border-[3px] border-slate-600/70 bg-slate-900/80 p-1 flex gap-1">
+      {/* 2. Mode Selection */}
+      <div className="space-y-1.5">
+        <span className="font-mono text-[9px] text-slate-500 uppercase tracking-widest block">
+          Режим
+        </span>
+        <div className="relative rounded-xl border border-white/10 bg-slate-950/80 p-1 flex gap-1">
           {MODE_GROUPS.map((group) => {
             const Icon = group.Icon
             const isGameGroup = group.id === 'game'
@@ -590,104 +676,115 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
                 key={group.id}
                 type="button"
                 onClick={() => {
-                  if (isGameGroup) {
-                    setMode('game')
-                  } else if (isMediaGroup) {
-                    // Default to youtube for media group
-                    setMode('youtube')
-                  }
+                  if (isGameGroup) setMode('game')
+                  else if (isMediaGroup) setMode('youtube')
                 }}
                 className={cn(
-                  'relative flex-1 min-h-[44px] rounded-xl font-gaming text-[11px] font-bold uppercase transition-all touch-manipulation flex items-center justify-center gap-1.5 overflow-hidden',
-                  'text-slate-400'
+                  'relative flex-1 min-h-[44px] rounded-lg font-gaming text-[11px] font-bold uppercase transition-all touch-manipulation flex items-center justify-center gap-1.5 overflow-hidden',
+                  isSelected ? 'text-white' : 'text-slate-400'
                 )}
               >
                 {isSelected && (
                   <motion.div
                     layoutId="engineModeActiveTab"
                     className={cn(
-                      'absolute inset-0 rounded-xl',
+                      'absolute inset-0 rounded-lg',
                       isGameGroup
-                        ? 'bg-gradient-to-br from-blue-500/40 to-cyan-500/40 shadow-[0_0_18px_rgba(59,130,246,0.5)]'
-                        : 'bg-gradient-to-br from-orange-500/40 to-amber-500/40 shadow-[0_0_18px_rgba(251,146,60,0.5)]'
+                        ? 'bg-gradient-to-br from-cyan-500/35 to-blue-500/35 border border-cyan-400/50 shadow-[inset_0_0_24px_rgba(34,211,238,0.2),0_0_16px_rgba(34,211,238,0.4)]'
+                        : 'bg-gradient-to-br from-orange-500/35 to-pink-500/35 border border-orange-400/50 shadow-[inset_0_0_24px_rgba(251,146,60,0.2),0_0_16px_rgba(251,113,133,0.35)]'
                     )}
                     transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                   />
                 )}
-                <span className={cn('relative z-10 flex items-center gap-1.5', isSelected && 'text-white')}>
+                <span className="relative z-10 flex items-center gap-1.5">
                   <Icon className="h-5 w-5" strokeWidth={2.4} />
-                  <span aria-hidden className="text-base">
-                    {group.emoji}
-                  </span>
+                  <span aria-hidden className="text-base">{group.emoji}</span>
                   <span>{group.label}</span>
                 </span>
               </button>
             )
           })}
         </div>
-        
-        {/* Sub-mode selector for Media (only shown when media is selected) */}
+
+        {/* Sub-mode: Обычные / Полезные (when Media) */}
         {(mode === 'youtube' || mode === 'good') && (
-          <div className="flex gap-1.5 justify-center">
-            <button
-              type="button"
-              onClick={() => setMode('youtube')}
-              className={cn(
-                'min-h-[32px] px-2.5 rounded-lg border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
-                mode === 'youtube'
-                  ? 'border-pink-500 bg-pink-500/25 text-pink-300'
-                  : 'border-slate-600 text-slate-400 hover:border-slate-500'
-              )}
-            >
-              <Tv className="h-3.5 w-3.5" strokeWidth={2.5} />
-              <span>📺 Обычные</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('good')}
-              className={cn(
-                'min-h-[32px] px-2.5 rounded-lg border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation flex items-center gap-1.5',
-                mode === 'good'
-                  ? 'border-emerald-500 bg-emerald-500/25 text-emerald-200'
-                  : 'border-slate-600 text-slate-400 hover:border-slate-500'
-              )}
-            >
-              <Apple className="h-3.5 w-3.5" strokeWidth={2.5} />
-              <span>🍏 Полезные</span>
-            </button>
+          <div className="flex gap-1.5">
+            {[
+              { id: 'youtube', label: '📺 Обычные', Icon: Tv },
+              { id: 'good', label: '🍏 Полезные', Icon: Apple },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setMode(opt.id)}
+                className={cn(
+                  'flex-1 min-h-[32px] px-2.5 rounded-lg border font-gaming text-[10px] font-bold uppercase transition touch-manipulation flex items-center justify-center gap-1.5',
+                  mode === opt.id
+                    ? 'border-pink-400/70 bg-pink-500/20 text-pink-200 shadow-[inset_0_0_12px_rgba(236,72,153,0.15)]'
+                    : 'border-white/10 text-slate-500 hover:bg-white/5 hover:text-slate-300'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         )}
-        
-        {/* Action buttons */}
-        <div className="flex gap-1.5 flex-1 min-w-0 justify-end">
-          <motion.button
+      </div>
+
+      {/* 3. Action Buttons: Start | Pause | Stop — визуально отражают статус active_timers */}
+      <div className="space-y-1.5">
+        <span className="font-mono text-[9px] text-slate-500 uppercase tracking-widest block">
+          Действия
+        </span>
+        <div className="flex gap-2">
+          <button
             type="button"
-            onClick={startBoth}
-            disabled={!bothCanStart}
+            onClick={startSelected}
+            disabled={!canStart || actionPending}
             className={cn(
-              'min-h-[36px] px-3 rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
-              bothCanStart
-                ? 'border-emerald-500/80 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
-                : 'border-slate-600 text-slate-500 opacity-60 cursor-not-allowed'
+              'flex-1 min-h-[44px] rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
+              canStart
+                ? 'border-emerald-500/70 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+                : 'btn-control-disabled border-slate-600/60 bg-slate-800/40 text-slate-500',
+              anyTargetPlaying &&
+                'shadow-[0_0_16px_rgba(34,197,94,0.4)] ring-1 ring-emerald-400/50',
+              actionPending && 'opacity-70 pointer-events-none'
             )}
           >
-            ▶ ЗАПУСТИТЬ ОБОИХ
-          </motion.button>
-          <motion.button
+            ▶ СТАРТ
+          </button>
+          <button
             type="button"
-            onClick={pauseAll}
-            disabled={!anyRunning}
+            onClick={pauseSelected}
+            disabled={!canPause || actionPending}
             className={cn(
-              'min-h-[36px] px-3 rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
-              anyRunning
-                ? 'border-amber-500/80 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
-                : 'border-slate-600 text-slate-500 opacity-60 cursor-not-allowed'
+              'flex-1 min-h-[44px] rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
+              canPause
+                ? 'border-amber-500/70 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 shadow-[inset_0_0_12px_rgba(251,191,36,0.1)]'
+                : 'btn-control-disabled border-slate-600/60 bg-slate-800/40 text-slate-500',
+              actionPending && 'opacity-70 pointer-events-none'
             )}
           >
-            ⏸ ПАУЗА ВСЕМ
-          </motion.button>
+            ⏸ ПАУЗА
+          </button>
+          <button
+            type="button"
+            onClick={stopSelected}
+            disabled={!canStop || actionPending}
+            className={cn(
+              'flex-1 min-h-[44px] rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
+              canStop
+                ? 'border-red-500/80 bg-red-500/20 text-red-200 hover:bg-red-500/30 shadow-[inset_0_0_12px_rgba(239,68,68,0.15)]'
+                : 'btn-control-disabled border-slate-600/60 bg-slate-800/40 text-slate-500',
+              actionPending && 'opacity-70 pointer-events-none'
+            )}
+          >
+            ■ СТОП
+          </button>
         </div>
       </div>
+
+      <div className="border-b border-white/10" aria-hidden />
 
       {/* Visual Burn Rate Timeline for each pilot */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-1.5">

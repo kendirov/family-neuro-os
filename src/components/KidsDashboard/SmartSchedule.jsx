@@ -5,7 +5,7 @@
  * 2026 terminal aesthetics.
  */
 import { useMemo } from 'react'
-import { WEEKLY_SCHEDULE } from '@/data/weeklySchedule'
+import { useScheduleStore } from '@/stores/useScheduleStore'
 import { getDayLabelShort } from '@/lib/dateUtils'
 import { cn } from '@/lib/utils'
 
@@ -15,17 +15,18 @@ const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0] // Mon..Sun
 const SCHEDULE_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 export function SmartSchedule() {
+  const schedule = useScheduleStore((s) => s.schedule)
   const today = useMemo(() => new Date().getDay(), [])
 
   const days = useMemo(() => {
     return DISPLAY_ORDER.map((dayOfWeek, idx) => {
       const isToday = dayOfWeek === today
       const key = SCHEDULE_KEYS[idx]
-      const schedule = WEEKLY_SCHEDULE[key]
-      const subjects = schedule
+      const dayData = schedule[key]
+      const subjects = dayData
         ? [...new Set([
-            ...(schedule.roma?.map((l) => l.name) ?? []),
-            ...(schedule.kirill?.map((l) => l.name) ?? []),
+            ...(dayData.roma?.map((s) => s.subject) ?? []),
+            ...(dayData.kirill?.map((s) => s.subject) ?? []),
           ])]
         : []
       return {
@@ -36,7 +37,7 @@ export function SmartSchedule() {
         isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
       }
     })
-  }, [today])
+  }, [today, schedule])
 
   return (
     <div

@@ -71,6 +71,17 @@
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
 }
 
+/* Скрытие скроллбара (Expensive Minimalism: чистый вид) */
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Cyberpunk Arcade: glass + glow utilities */
 @layer utilities {
   .glass-cyan {
@@ -385,6 +396,250 @@
   }
   .animate-gaming-pulse {
     animation: gaming-pulse 2s ease-in-out infinite;
+  }
+
+  /* Control Center: trading terminal / command deck (2026) */
+  @keyframes control-start-ready-pulse {
+    0%, 100% {
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.5),
+                  0 0 24px rgba(34, 211, 238, 0.25),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+    50% {
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.7),
+                  0 0 32px rgba(34, 211, 238, 0.4),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+  }
+  .control-start-ready {
+    animation: control-start-ready-pulse 2s ease-in-out infinite;
+  }
+  @keyframes sync-dot-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.15); }
+  }
+  .sync-dot-connected {
+    animation: sync-dot-pulse 1.5s ease-in-out infinite;
+  }
+  .sync-dot-offline {
+    animation: sync-dot-pulse 2s ease-in-out infinite;
+  }
+  .btn-control-disabled {
+    filter: grayscale(0.8);
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Screen Time HUD: liquid energy gradients (2026) */
+  :root {
+    --liquid-safe-from: #10b981;
+    --liquid-safe-to: #06b6d4;
+    --liquid-warning-from: #f97316;
+    --liquid-warning-to: #ef4444;
+    --liquid-glow-safe: rgba(34, 211, 238, 0.4);
+    --liquid-glow-penalty: rgba(239, 68, 68, 0.7);
+  }
+
+  @keyframes liquid-shimmer {
+    0% { background-position: 200% 50%; }
+    100% { background-position: -200% 50%; }
+  }
+
+  @keyframes penalty-glow-pulse {
+    0%, 100% {
+      box-shadow: 0 0 16px var(--liquid-glow-penalty),
+                  0 0 32px rgba(239, 68, 68, 0.3),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+    50% {
+      box-shadow: 0 0 24px var(--liquid-glow-penalty),
+                  0 0 48px rgba(239, 68, 68, 0.45),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+  }
+
+  .animate-liquid-shimmer {
+    background-size: 200% 100%;
+    animation: liquid-shimmer 4s ease-in-out infinite;
+  }
+
+  .animate-penalty-glow {
+    animation: penalty-glow-pulse 1.5s ease-in-out infinite;
+  }
+
+  /* =============================================================================
+     Screen Time: GTA/Tron Lightcycle Road Track (2026)
+     Expensive Minimalism — dark tech road, neon trail, leading edge pulse
+     ============================================================================= */
+
+  /* Пустая дорога: тёмная сетка + пунктирные линии (как разметка шоссе) */
+  .screen-time-track-bg {
+    background-color: rgb(2 6 23);
+    background-image:
+      /* Центральная пунктирная линия (разметка) */
+      repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 12px,
+        rgba(71, 85, 105, 0.6) 12px,
+        rgba(71, 85, 105, 0.6) 20px
+      ),
+      /* Сетка/следы (Tron grid) */
+      linear-gradient(
+        90deg,
+        rgba(51, 65, 85, 0.15) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        0deg,
+        rgba(51, 65, 85, 0.12) 1px,
+        transparent 1px
+      );
+    background-size: 32px 100%, 8px 8px, 8px 8px;
+    background-position: 0 0, 0 0, 0 0;
+    border: 1px solid rgba(71, 85, 105, 0.4);
+    box-shadow:
+      inset 0 0 24px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  /* Неоновый след: Cyan (игры) — сильное свечение */
+  .screen-time-neon-cyan {
+    background: linear-gradient(
+      90deg,
+      rgba(6, 182, 212, 0.95) 0%,
+      rgba(34, 211, 238, 0.98) 30%,
+      rgba(34, 211, 238, 1) 70%,
+      rgba(56, 189, 248, 0.95) 100%
+    );
+    box-shadow:
+      0 0 12px rgba(34, 211, 238, 0.9),
+      0 0 24px rgba(34, 211, 238, 0.6),
+      0 0 40px rgba(34, 211, 238, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.8));
+  }
+
+  /* Неоновый след: Orange/Pink (мультики) */
+  .screen-time-neon-media {
+    background: linear-gradient(
+      90deg,
+      rgba(251, 146, 60, 0.95) 0%,
+      rgba(251, 113, 133, 0.98) 40%,
+      rgba(244, 114, 182, 0.98) 70%,
+      rgba(236, 72, 153, 0.95) 100%
+    );
+    box-shadow:
+      0 0 12px rgba(251, 113, 133, 0.9),
+      0 0 24px rgba(251, 146, 60, 0.5),
+      0 0 40px rgba(244, 114, 182, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    filter: drop-shadow(0 0 8px rgba(251, 113, 133, 0.8));
+  }
+
+  /* Штраф: Orange→Red пульсирующий */
+  .screen-time-neon-penalty {
+    background: linear-gradient(
+      90deg,
+      rgba(249, 115, 22, 0.95) 0%,
+      rgba(239, 68, 68, 0.98) 50%,
+      rgba(248, 113, 113, 0.95) 100%
+    );
+    box-shadow:
+      0 0 14px rgba(239, 68, 68, 0.9),
+      0 0 28px rgba(239, 68, 68, 0.5),
+      0 0 44px rgba(239, 68, 68, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.8));
+    animation: penalty-glow-pulse 1.5s ease-in-out infinite;
+  }
+
+  /* Ведущий край: пульсирующий индикатор (машина/импульс) */
+  .screen-time-leading-edge {
+    width: 10px;
+    height: 100%;
+    min-height: 24px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.95) 30%,
+      rgba(255, 255, 255, 1) 50%,
+      rgba(255, 255, 255, 0.95) 70%,
+      transparent 100%
+    );
+    box-shadow:
+      0 0 8px rgba(255, 255, 255, 0.9),
+      0 0 16px rgba(255, 255, 255, 0.6),
+      0 0 24px rgba(255, 255, 255, 0.4);
+    border-radius: 2px;
+    animation: screen-time-edge-pulse 1.2s ease-in-out infinite;
+  }
+
+  .screen-time-leading-edge-cyan {
+    box-shadow:
+      0 0 10px rgba(34, 211, 238, 1),
+      0 0 20px rgba(34, 211, 238, 0.8),
+      0 0 30px rgba(34, 211, 238, 0.5);
+  }
+
+  .screen-time-leading-edge-media {
+    box-shadow:
+      0 0 10px rgba(251, 113, 133, 1),
+      0 0 20px rgba(244, 114, 182, 0.8),
+      0 0 30px rgba(236, 72, 153, 0.5);
+  }
+
+  .screen-time-leading-edge-penalty {
+    box-shadow:
+      0 0 10px rgba(239, 68, 68, 1),
+      0 0 20px rgba(248, 113, 113, 0.8),
+      0 0 30px rgba(239, 68, 68, 0.5);
+  }
+
+  @keyframes screen-time-edge-pulse {
+    0%, 100% { opacity: 1; transform: scaleY(1); }
+    50% { opacity: 0.85; transform: scaleY(1.05); }
+  }
+
+  /* Активный трек: лёгкий пульс + moving gradient при status === 'playing' */
+  .screen-time-track-active {
+    animation: screen-time-track-pulse 2s ease-in-out infinite;
+  }
+  .screen-time-track-active::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.03) 25%,
+      transparent 50%,
+      rgba(255, 255, 255, 0.03) 75%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: screen-time-shimmer 3s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes screen-time-track-pulse {
+    0%, 100% { box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.4); }
+    50% { box-shadow: inset 0 0 24px rgba(34, 211, 238, 0.08); }
+  }
+  @keyframes screen-time-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Таймер: крупный gaming-style, tabular, поверх трека */
+  .screen-time-display {
+    font-family: var(--font-geist-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-shadow:
+      0 0 20px currentColor,
+      0 0 40px currentColor,
+      0 2px 4px rgba(0, 0, 0, 0.6);
   }
 
   @keyframes expire-flash {

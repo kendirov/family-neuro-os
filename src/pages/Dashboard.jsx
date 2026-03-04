@@ -22,6 +22,7 @@ import { CountUpNumber } from '@/components/CountUpNumber'
 import { SupplyDepotSchedule } from '@/components/SupplyDepotSchedule'
 import { TransactionModal } from '@/components/TransactionModal'
 import { WallSchedule } from '@/components/WallSchedule'
+import { AdminScheduleEditor } from '@/components/AdminControlPanel/AdminScheduleEditor'
 import { TodayStats } from '@/components/TodayStats'
 import { motion } from 'framer-motion'
 import { Wallet, Coins } from 'lucide-react'
@@ -1127,13 +1128,14 @@ export function Dashboard({ mode = 'pilot' }) {
       {isCommander && <GlobalStatus />}
       {/* Weekly flight plan — только в режиме командира; пилоты видят Timeline в HUD */}
       {isCommander && (
-        <div className="px-4 pt-2 md:px-6">
+        <div className="px-4 pt-2 md:px-6 space-y-4">
           <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.25)] px-3 py-3 sm:px-4 sm:py-3">
             <h2 className="font-mono text-[10px] sm:text-[11px] text-slate-400 uppercase tracking-[0.2em] mb-2">
               ПОЛЁТНЫЙ ПЛАН — 5 ДНЕЙ
             </h2>
             <WallSchedule />
           </div>
+          <AdminScheduleEditor />
         </div>
       )}
       <main className="dashboard-grid flex-1 min-h-0 flex flex-col overflow-y-auto p-4">
