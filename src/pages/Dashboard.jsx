@@ -32,6 +32,8 @@ import { GlobalStatus } from '@/components/GlobalStatus'
 import { PilotHUDGrid } from '@/components/PilotHUD/PilotHUDGrid'
 import { TimerDispatchPanel } from '@/components/TimerDispatchPanel'
 import { AdminControlPanel } from '@/components/AdminControlPanel'
+import { TurboTimerErrorBoundary } from '@/components/TurboTimerErrorBoundary'
+import { useSearchParams } from 'react-router-dom'
 
 /** Mission tasks from centralized task config (4 phases: Утро, Школа, Питание, Дом и сон). */
 const MISSION_TASKS_BY_CATEGORY = getMissionTasksByCategory()
@@ -1065,6 +1067,7 @@ function PilotColumnPlaceholder({ label, theme = 'purple' }) {
 }
 
 export function Dashboard({ mode = 'pilot' }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const users = useAppStore((s) => s.users)
   const isLoading = useAppStore((s) => s.isLoading)
   const transactions = useAppStore((s) => s.transactions ?? [])
@@ -1096,6 +1099,30 @@ export function Dashboard({ mode = 'pilot' }) {
 
   const isPilot = mode === 'pilot'
   const isCommander = mode === 'commander'
+
+  // Legacy Commander dashboard (not used by /admin/* routing anymore).
+  const adminTab = (() => {
+    const raw = searchParams.get('tab')
+    if (raw === 'kids' || raw === 'timer' || raw === 'log' || raw === 'rewards') return raw
+    return 'center'
+  })()
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    if (!isCommander) return
+    // eslint-disable-next-line no-console
+    console.groupCollapsed('[TG_NAV] Admin tab')
+    // eslint-disable-next-line no-console
+    console.log(adminTab)
+    // eslint-disable-next-line no-console
+    console.groupEnd()
+  }, [adminTab, isCommander])
+
+  const setAdminTab = (next) => {
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('tab', next)
+    setSearchParams(nextParams, { replace: true })
+  }
 
   /** Right Panel glow: engine running = blue pulse; Overdrive (будни > 60 мин) = red alarm. */
   const engineRunning = useAppStore((s) => s.pilots?.roma?.status === 'RUNNING' || s.pilots?.kirill?.status === 'RUNNING')
@@ -1139,10 +1166,52 @@ export function Dashboard({ mode = 'pilot' }) {
         </div>
       )}
       <main className="dashboard-grid flex-1 min-h-0 flex flex-col overflow-y-auto p-4">
+        {isCommander && (
+          <nav
+            className="mb-4 panel-glass rounded-2xl p-2 border border-white/10"
+            aria-label="Навигация администратора (legacy)"
+          >
+            <div role="tablist" aria-orientation="horizontal" className="grid grid-cols-5 gap-2">
+              {[
+                { id: 'center', label: 'Центр' },
+                { id: 'kids', label: 'Дети' },
+                { id: 'timer', label: 'Таймер' },
+                { id: 'log', label: 'Журнал' },
+                { id: 'rewards', label: 'Награды' },
+              ].map((t) => {
+                const active = adminTab === t.id
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    tabIndex={active ? 0 : -1}
+                    onClick={() => setAdminTab(t.id)}
+                    className={cn(
+                      'min-h-[44px] rounded-xl border px-3 py-2 font-mono text-xs font-bold uppercase tracking-wider transition touch-manipulation',
+                      active
+                        ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-200'
+                        : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/10'
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                )
+              })}
+            </div>
+          </nav>
+        )}
         {/* 2-column grid: Left = Pilots, Right = Control Center */}
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden gap-4">
         {/* LEFT COLUMN — Pilots (Roma / Kirill cards) */}
-        <section className="dashboard-left flex flex-col min-h-0 lg:min-h-0 panel-glass rounded-2xl p-5 relative">
+        <section
+          className={cn(
+            'dashboard-left flex flex-col min-h-0 lg:min-h-0 panel-glass rounded-2xl p-5 relative',
+            isCommander && adminTab !== 'kids' && 'hidden lg:flex'
+          )}
+          aria-hidden={isCommander && adminTab !== 'kids'}
+        >
           <span className="panel-bolt bolt-tl" aria-hidden />
           <span className="panel-bolt bolt-tr" aria-hidden />
           <span className="panel-bolt bolt-bl" aria-hidden />
@@ -1260,7 +1329,7 @@ export function Dashboard({ mode = 'pilot' }) {
         </section>
 
         {/* Glowing divider — visible on laptop */}
-        <div className="dashboard-divider shrink-0" aria-hidden />
+        <div className={cn('dashboard-divider shrink-0', isCommander && adminTab === 'kids' && 'hidden lg:block')} aria-hidden />
 
         {/* RIGHT PANEL — Control Core (40%) — glassmorphism; glow when engine running / overdrive */}
         <section
@@ -1274,27 +1343,72 @@ export function Dashboard({ mode = 'pilot' }) {
           <span className="panel-bolt bolt-tr" aria-hidden />
           <span className="panel-bolt bolt-bl" aria-hidden />
           <span className="panel-bolt bolt-br" aria-hidden />
-          <h2 className="font-gaming text-base text-slate-400 mb-3 shrink-0 uppercase tracking-wider">ЦЕНТР УПРАВЛЕНИЯ</h2>
+          <h2 className="font-gaming text-base text-slate-400 mb-3 shrink-0 uppercase tracking-wider">
+            {isCommander ? 'УПРАВЛЕНИЕ' : 'ЦЕНТР УПРАВЛЕНИЯ'}
+          </h2>
           <div className="flex flex-1 flex-col gap-4 min-h-0 overflow-auto">
-            {isCommander && (
-              <TimerDispatchPanel onShowToast={setToast} />
-            )}
-            <RaidBoss isCommander={isCommander} />
-            <ControlCenter
-              wheelPilot={wheelPilot}
-              setWheelPilot={setWheelPilot}
-              setWheelOpen={setWheelOpen}
-            />
-            <TodayStats />
-            <WheelTrigger
-              wheelPilot={wheelPilot}
-              setWheelPilot={setWheelPilot}
-              onOpenWheel={() => setWheelOpen(true)}
-            />
-            <div className="flex-1 min-h-0 flex flex-col">
-              <MarketplaceSection />
+            {/* CENTER */}
+            <div className={cn(isCommander && adminTab !== 'center' && 'hidden')} role="region" aria-label="Центр">
+              <RaidBoss isCommander={isCommander} />
+              <TodayStats />
             </div>
-            {isCommander && <WeeklyAnalytics />}
+
+            {/* TIMER */}
+            <div className={cn(isCommander && adminTab !== 'timer' && 'hidden')} role="region" aria-label="Таймер">
+              <TimerDispatchPanel onShowToast={setToast} />
+            </div>
+
+            {/* Shared timer core (single mounted instance) */}
+            {isCommander && (adminTab === 'center' || adminTab === 'timer') && (
+              <TurboTimerErrorBoundary>
+                <ControlCenter
+                  wheelPilot={wheelPilot}
+                  setWheelPilot={setWheelPilot}
+                  setWheelOpen={setWheelOpen}
+                />
+              </TurboTimerErrorBoundary>
+            )}
+
+            {/* LOG */}
+            <div className={cn(isCommander && adminTab !== 'log' && 'hidden')} role="region" aria-label="Журнал">
+              <TodayStats />
+              <WeeklyAnalytics />
+            </div>
+
+            {/* REWARDS */}
+            <div className={cn(isCommander && adminTab !== 'rewards' && 'hidden')} role="region" aria-label="Награды">
+              <WheelTrigger
+                wheelPilot={wheelPilot}
+                setWheelPilot={setWheelPilot}
+                onOpenWheel={() => setWheelOpen(true)}
+              />
+              <div className="flex-1 min-h-0 flex flex-col">
+                <MarketplaceSection />
+              </div>
+            </div>
+
+            {/* PILOT MODE (no tabs): preserve existing stack */}
+            {!isCommander && (
+              <>
+                <RaidBoss isCommander={isCommander} />
+                <TurboTimerErrorBoundary>
+                  <ControlCenter
+                    wheelPilot={wheelPilot}
+                    setWheelPilot={setWheelPilot}
+                    setWheelOpen={setWheelOpen}
+                  />
+                </TurboTimerErrorBoundary>
+                <TodayStats />
+                <WheelTrigger
+                  wheelPilot={wheelPilot}
+                  setWheelPilot={setWheelPilot}
+                  onOpenWheel={() => setWheelOpen(true)}
+                />
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <MarketplaceSection />
+                </div>
+              </>
+            )}
           </div>
         </section>
         </div>

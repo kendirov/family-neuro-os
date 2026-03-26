@@ -1580,6 +1580,58 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  /**
+   * DB first (remote-only): insert tx → update profile → damageBoss.
+   * Does NOT mutate local users/transactions; intended for optimistic UIs to commit/rollback explicitly.
+   */
+  addPointsRemote: async (userId, amount, reason, skipBoss = false) => {
+    const num = Math.abs(Number(amount))
+    if (!num || num <= 0) return { ok: false, error: new Error('amount must be > 0') }
+    const today = getDateKey()
+    const state = get()
+    const user = state.users.find((u) => u.id === userId)
+    const lastReset = user?.last_daily_reset ?? null
+    const isResetToday = lastReset === today
+    const prevDaily = isResetToday ? (user?.daily_points_earned ?? 0) : 0
+    const newDailyPoints = prevDaily + num
+    const newBalance = (user?.balance ?? 0) + num
+
+    try {
+      const txId =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const { data: txRow, error: txErr } = await supabase
+        .from('transactions')
+        .insert({
+          id: txId,
+          user_id: userId,
+          amount: num,
+          description: reason ?? 'Начислено',
+          type: 'earn',
+        })
+        .select('id, created_at')
+        .single()
+      if (txErr) throw txErr
+
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({
+          balance: newBalance,
+          daily_points_earned: newDailyPoints,
+          last_daily_reset: today,
+        })
+        .eq('id', userId)
+      if (profileErr) throw profileErr
+
+      if (!skipBoss) await get().damageBoss(num)
+
+      return { ok: true, tx: txRow, today, newBalance, newDailyPoints }
+    } catch (e) {
+      return { ok: false, error: e }
+    }
+  },
+
   /** DB first: reset raid progress in settings. */
   resetRaidProgress: async () => {
     try {
@@ -1639,6 +1691,49 @@ export const useAppStore = create((set, get) => ({
       }))
     } catch (e) {
       console.error('spendPoints: Supabase failed', e)
+    }
+  },
+
+  /**
+   * DB first (remote-only): insert tx → update profile → damageBoss.
+   * Does NOT mutate local users/transactions; intended for optimistic UIs to commit/rollback explicitly.
+   */
+  spendPointsRemote: async (userId, amount, reason) => {
+    const num = Math.abs(Number(amount))
+    if (!num || num <= 0) return { ok: false, error: new Error('amount must be > 0') }
+    const state = get()
+    const user = state.users.find((u) => u.id === userId)
+    const newBalance = Math.max(0, (user?.balance ?? 0) - num)
+
+    try {
+      const txId =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const { data: txRow, error: txErr } = await supabase
+        .from('transactions')
+        .insert({
+          id: txId,
+          user_id: userId,
+          amount: -num,
+          description: reason ?? 'Списано',
+          type: 'spend',
+        })
+        .select('id, created_at')
+        .single()
+      if (txErr) throw txErr
+
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({ balance: newBalance })
+        .eq('id', userId)
+      if (profileErr) throw profileErr
+
+      await get().damageBoss(-num)
+
+      return { ok: true, tx: txRow, newBalance }
+    } catch (e) {
+      return { ok: false, error: e }
     }
   },
 

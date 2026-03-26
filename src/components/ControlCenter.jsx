@@ -1,18 +1,13 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Gamepad2, Tv, Flame, Apple } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
-import { playEngineRev, playCashRegister, playError, playBurnTick } from '@/lib/sounds'
+import { playEngineRev, playCashRegister, playError } from '@/lib/sounds'
 import { cn } from '@/lib/utils'
 import { PilotEngine } from '@/components/PilotEngine'
 import { WheelBanner } from '@/components/WheelBanner'
 import { ConsumptionWidget } from '@/components/ConsumptionWidget'
-import { useRealtimeTimer } from '@/hooks/useRealtimeTimer'
-import {
-  startActiveTimer,
-  pauseActiveTimer,
-  stopActiveTimer,
-} from '@/lib/activeTimersService'
+import { useTurboTimerStore } from '@/stores/useTurboTimerStore'
 
 const MODES = [
   { id: 'game', label: 'ИГРЫ', Icon: Gamepad2, color: 'blue', emoji: '🎮' },
@@ -28,12 +23,6 @@ const MODE_GROUPS = [
 
 // CRITICAL: Order must be Kirill first, Roma second (for consistent left/right layout)
 const PILOT_IDS = ['kirill', 'roma']
-
-/** Будни (Пн–Пт): до 1 ч — 1 кр/мин, после 1 ч — 2 кр/мин. Выходные — всегда 1 кр/мин. */
-function isWeekday() {
-  const d = new Date().getDay() // 0 = Sun, 6 = Sat
-  return d >= 1 && d <= 5
-}
 
 /** Date key for today (YYYY-MM-DD). */
 function getDateKey() {
@@ -315,284 +304,54 @@ function DailyFlightLog() {
 export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) {
   const users = useAppStore((s) => s.users)
   const pilots = useAppStore((s) => s.pilots)
-  const updateSessionBurn = useAppStore((s) => s.updateSessionBurn)
-  const getGamingMinutesToday = useAppStore((s) => s.getGamingMinutesToday)
-  const getTodayGameTime = useAppStore((s) => s.getTodayGameTime)
-  const getTodayMediaTime = useAppStore((s) => s.getTodayMediaTime)
-  const startEngineStore = useAppStore((s) => s.startEngine)
-  const pauseEngineStore = useAppStore((s) => s.pauseEngine)
-  const resumeEngineStore = useAppStore((s) => s.resumeEngine)
-  const stopEngineStore = useAppStore((s) => s.stopEngine)
-  const setPilotSessionMinutes = useAppStore((s) => s.setPilotSessionMinutes)
-  const updateLastBurnAt = useAppStore((s) => s.updateLastBurnAt)
   const setLastOfflineSyncToast = useAppStore((s) => s.setLastOfflineSyncToast)
-  const addGamingMinutesToday = useAppStore((s) => s.addGamingMinutesToday)
+  const timerStatus = useTurboTimerStore((s) => s.status)
+  const selectedChildId = useTurboTimerStore((s) => s.selectedChildId)
+  const timerMode = useTurboTimerStore((s) => s.mode)
+  const activityType = useTurboTimerStore((s) => s.activityType)
+  const remainingSeconds = useTurboTimerStore((s) => s.remainingSeconds)
+  const totalSeconds = useTurboTimerStore((s) => s.totalSeconds)
+  const isHydrated = useTurboTimerStore((s) => s.isHydrated)
+  const errorMessage = useTurboTimerStore((s) => s.errorMessage)
+  const lastBurnedMinuteByPilot = useTurboTimerStore((s) => s.lastBurnedMinuteByPilot)
+  const hydrateFromAppStore = useTurboTimerStore((s) => s.hydrateFromAppStore)
+  const selectChild = useTurboTimerStore((s) => s.selectChild)
+  const setMode = useTurboTimerStore((s) => s.setMode)
+  const setCartoonsFlavor = useTurboTimerStore((s) => s.setCartoonsFlavor)
+  const startTimer = useTurboTimerStore((s) => s.startTimer)
+  const pauseTimer = useTurboTimerStore((s) => s.pauseTimer)
+  const resumeTimer = useTurboTimerStore((s) => s.resumeTimer)
+  const stopTimer = useTurboTimerStore((s) => s.stopTimer)
 
-  const [mode, setMode] = useState('game')
-  const [target, setTarget] = useState('both') // 'roma' | 'kirill' | 'both'
-  const [tick, setTick] = useState(0)
-  const [sessionCreditsBurned, setSessionCreditsBurned] = useState(0)
-  const [actionPending, setActionPending] = useState(false)
+  useEffect(() => {
+    if (!isHydrated) hydrateFromAppStore()
+  }, [isHydrated, hydrateFromAppStore])
 
-  const lastDeductedMinuteRef = useRef({ roma: 0, kirill: 0 })
-  const intervalRef = useRef(null)
-
-  // active_timers: live-состояние из Supabase Realtime
-  // Используем режим пилота при активной сессии, иначе выбранный mode
-  const romaActivityMode = pilots?.roma?.mode ?? mode
-  const kirillActivityMode = pilots?.kirill?.mode ?? mode
-  const romaTimer = useRealtimeTimer('roma', romaActivityMode)
-  const kirillTimer = useRealtimeTimer('kirill', kirillActivityMode)
-
-  const romaElapsedSeconds = romaTimer.displaySeconds
-  const kirillElapsedSeconds = kirillTimer.displaySeconds
-
+  // Keep global timer store aligned with store-driven pilot state (route changes / remount safe)
   const anyRunning =
-    (pilots?.roma?.status === 'RUNNING') || (pilots?.kirill?.status === 'RUNNING')
-
-  const targetIds = target === 'both' ? PILOT_IDS : [target]
-
-  // Состояние кнопок из active_timers (приоритет) + store (fallback)
-  const getTimerStatus = (id) => {
-    const t = id === 'roma' ? romaTimer : kirillTimer
-    if (t.row?.status) return t.row.status
-    const p = pilots?.[id]
-    if (p?.status === 'RUNNING') return 'playing'
-    if (p?.status === 'PAUSED') return 'paused'
-    return 'stopped'
-  }
-
-  const anyTargetPlaying = targetIds.some((id) => getTimerStatus(id) === 'playing')
-  const anyTargetPaused = targetIds.some((id) => getTimerStatus(id) === 'paused')
-
-  const canStart = targetIds.every((id) => (users.find((u) => u.id === id)?.balance ?? 0) >= 1)
-  const canPause = anyTargetPlaying
-  const canStop = anyTargetPlaying || anyTargetPaused
-
-  const startSelected = async () => {
-    if (!canStart || actionPending) {
-      playError()
-      return
-    }
-    setActionPending(true)
-    playEngineRev()
-    try {
-      for (const id of targetIds) {
-        await startActiveTimer(id, mode)
-        startEngineStore(id, mode)
-      }
-      lastDeductedMinuteRef.current = { roma: 0, kirill: 0 }
-      setSessionCreditsBurned(0)
-    } catch (e) {
-      console.error('startActiveTimer:', e)
-      playError()
-      setLastOfflineSyncToast({ message: 'Ошибка старта таймера. Проверьте консоль (F12).' })
-    } finally {
-      setActionPending(false)
-    }
-  }
-
-  const pauseSelected = async () => {
-    if (!canPause || actionPending) return
-    setActionPending(true)
-    try {
-      for (const id of targetIds) {
-        const t = id === 'roma' ? romaTimer : kirillTimer
-        if (t.row?.status === 'playing') {
-          await pauseActiveTimer(id, t.row.activity_type ?? mode, t.row)
-          pauseEngineStore(id)
-        }
-      }
-    } catch (e) {
-      console.error('pauseActiveTimer:', e)
-      playError()
-      setLastOfflineSyncToast({ message: 'Ошибка паузы. Проверьте консоль (F12).' })
-    } finally {
-      setActionPending(false)
-    }
-  }
-
-  const stopSelected = async () => {
-    if (!canStop || actionPending) return
-    setActionPending(true)
-    playCashRegister()
-    try {
-      for (const id of targetIds) {
-        const t = id === 'roma' ? romaTimer : kirillTimer
-        const status = getTimerStatus(id)
-        if (status === 'playing' || status === 'paused') {
-          const activityType = t.row?.activity_type ?? mode
-          await stopActiveTimer(id, activityType, t.row, (pilotName, actType, elapsedMinutes) => {
-            addGamingMinutesToday(elapsedMinutes, actType, [pilotName])
-          })
-          stopEngineStore(id)
-        }
-      }
-      lastDeductedMinuteRef.current = { roma: 0, kirill: 0 }
-    } catch (e) {
-      console.error('stopActiveTimer:', e)
-      playError()
-      setLastOfflineSyncToast({ message: 'Ошибка остановки. Проверьте консоль (F12).' })
-    } finally {
-      setActionPending(false)
-    }
-  }
-
-  // Callbacks for PilotEngine (no longer need local state management)
-  const onStartRefs = (id) => {
-    lastDeductedMinuteRef.current[id] = 0
-  }
-
-  const onPause = (id) => {
-    // Server handles pause state
-  }
-
-  const onResume = (id) => {
-    // Server handles resume state
-  }
-
-  const onStop = (id) => {
-    lastDeductedMinuteRef.current[id] = 0
-  }
-
-  /** Tick every 1000ms: update UI counter based on server timer state. */
+    (pilots?.roma?.timerStatus === 'running') || (pilots?.kirill?.timerStatus === 'running')
+  const anyPaused =
+    (pilots?.roma?.timerStatus === 'paused') || (pilots?.kirill?.timerStatus === 'paused')
   useEffect(() => {
-    if (!anyRunning) return
-    intervalRef.current = setInterval(() => {
-      setTick((t) => t + 1)
-      PILOT_IDS.forEach((id) => {
-        const p = pilots?.[id]
-        if (!p || p.status !== 'RUNNING') return
-        
-        // Calculate elapsed seconds from server state
-        // IF status == 'running': seconds_today + (NOW - timer_start_at)
-        // IF status == 'paused': seconds_today
-        const secondsToday = p.secondsToday ?? 0
-        let elapsedSeconds = secondsToday
-        if (p.timerStatus === 'running' && p.timerStartAt) {
-          const now = Date.now()
-          const startMs = new Date(p.timerStartAt).getTime()
-          const currentSegmentSeconds = Math.floor((now - startMs) / 1000)
-          elapsedSeconds = secondsToday + currentSegmentSeconds
-        }
-        
-        const rawMinutes = Math.floor(elapsedSeconds / 60)
-        const cap = p?.sessionBalanceAtStart != null ? p.sessionBalanceAtStart : Infinity
-        const sessionMinutes = Math.min(rawMinutes, cap)
-        setPilotSessionMinutes(id, sessionMinutes)
-      })
-    }, 1000)
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [anyRunning, setPilotSessionMinutes, pilots?.roma?.status, pilots?.kirill?.status, pilots?.roma?.timerStartAt, pilots?.kirill?.timerStartAt, pilots?.roma?.secondsToday, pilots?.kirill?.secondsToday, pilots?.roma?.timerStatus, pilots?.kirill?.timerStatus])
-
-  /**
-   * Per-MINUTE deduction only: for each RUNNING pilot, deduct 1 XP (or 2 on weekday overdrive) per elapsed minute.
-   * Uses the ACTIVE session transaction ID (pilot.activeSessionId). We only UPDATE that single row via
-   * updateSessionBurn — never create/insert a new transaction in this loop.
-   * Weekend (Sat/Sun): rate is ALWAYS 1x. Safety: if balance <= 0, force stop engine.
-   */
-  useEffect(() => {
-    PILOT_IDS.forEach((id) => {
-      const p = pilots?.[id]
-      if (p?.status !== 'RUNNING') return
-      const currentMinute = p.sessionMinutes ?? 0
-      const cap = p?.sessionBalanceAtStart != null ? p.sessionBalanceAtStart : Infinity
-      if (currentMinute > cap) {
-        playError()
-        stopEngineStore(id)
-        setLastOfflineSyncToast({ message: 'Двигатель остановлен: кончилось топливо (защита от минуса)' })
-        lastDeductedMinuteRef.current[id] = 0
-        return
-      }
-      const oldLast = lastDeductedMinuteRef.current[id] ?? 0
-      if (currentMinute <= oldLast) return
-
-      const state = useAppStore.getState()
-      const user = state.users.find((x) => x.id === id)
-      if (!user || user.balance < 1) {
-        playError()
-        stopEngineStore(id)
-        lastDeductedMinuteRef.current[id] = 0
-        return
-      }
-
-      const maxMinute = Math.min(currentMinute, cap)
-      let burned = 0
-      // Track time locally as we process each minute to ensure correct tier calculation
-      const initialState = useAppStore.getState()
-      let localGameTime = initialState.getTodayGameTime(id)
-      let localMediaTime = initialState.getTodayMediaTime(id)
-      
-      for (let m = oldLast + 1; m <= maxMinute; m++) {
-        const nowState = useAppStore.getState()
-        const pilotUser = nowState.users.find((x) => x.id === id)
-        if (!pilotUser || pilotUser.balance <= 0) {
-          playError()
-          stopEngineStore(id)
-          lastDeductedMinuteRef.current[id] = oldLast
-          return
-        }
-
-        const mode = p.mode ?? 'game'
-        // Calculate burn rate using tiered system based on current accumulated time
-        let rate
-        if (mode === 'good') {
-          // Media mode (good): tiered rate based on today_media_time
-          if (localMediaTime < 20) rate = 0
-          else if (localMediaTime < 60) rate = 0.5
-          else rate = 2
-        } else if (mode === 'youtube') {
-          // Media mode (youtube): tiered rate based on today_media_time
-          if (localMediaTime < 20) rate = 0
-          else if (localMediaTime < 60) rate = 0.5
-          else rate = 2
-        } else {
-          // Game mode: tiered rate based on today_game_time
-          if (localGameTime < 60) rate = 1
-          else rate = 2
-        }
-
-        // Update local time tracking for next iteration
-        if (mode === 'good' || mode === 'youtube') {
-          localMediaTime += 1
-        } else {
-          localGameTime += 1
-        }
-
-        if (rate === 0) {
-          // 0 XP, но считаем экранное время.
-          addGamingMinutesToday(1, mode, [id])
-          continue
-        }
-
-        const amount = Math.min(rate, pilotUser.balance)
-        if (amount <= 0) break
-        updateSessionBurn(id, amount, m, mode)
-        burned += amount
-      }
-      if (burned > 0) playBurnTick()
-      lastDeductedMinuteRef.current[id] = maxMinute
-      setSessionCreditsBurned((prev) => prev + burned)
-      updateLastBurnAt(id)
-      if (maxMinute >= cap) {
-        setLastOfflineSyncToast({ message: 'Двигатель остановлен: кончилось топливо (защита от минуса)' })
-      }
-    })
-  }, [pilots?.roma?.sessionMinutes, pilots?.roma?.status, pilots?.kirill?.sessionMinutes, pilots?.kirill?.status, pilots?.roma?.sessionBalanceAtStart, pilots?.kirill?.sessionBalanceAtStart, updateSessionBurn, stopEngineStore, updateLastBurnAt, setLastOfflineSyncToast])
+    if (anyRunning || anyPaused) hydrateFromAppStore()
+  }, [anyRunning, anyPaused, pilots?.roma?.timerStatus, pilots?.kirill?.timerStatus, hydrateFromAppStore])
 
   // Small realtime sync indicator (multi-device timer sync)
   const realtimeStatus = useAppStore((s) => s.realtimeStatus)
-
-  const syncDotConnected = realtimeStatus === 'connected'
-  const syncDotOffline = realtimeStatus === 'error' || realtimeStatus === 'idle'
 
   const TARGET_OPTIONS = [
     { id: 'kirill', label: 'Кирилл', accent: 'purple' },
     { id: 'roma', label: 'Рома', accent: 'cyan' },
     { id: 'both', label: 'Оба', accent: 'slate' },
   ]
+
+  const canStart = useMemo(() => {
+    const ids = selectedChildId === 'roma' ? ['roma'] : selectedChildId === 'kirill' ? ['kirill'] : ['kirill', 'roma']
+    return ids.every((id) => (users.find((u) => u.id === id)?.balance ?? 0) >= 1)
+  }, [selectedChildId, users])
+
+  const canPauseOrResume = timerStatus === 'playing' || timerStatus === 'paused'
+  const canStop = timerStatus === 'playing' || timerStatus === 'paused' || timerStatus === 'expired'
 
   return (
     <div className="relative rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-xl p-3 sm:p-4 shrink-0 flex flex-col gap-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_24px_rgba(0,0,0,0.35)]">
@@ -631,12 +390,12 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         </span>
         <div className="flex gap-px rounded-xl border border-white/10 bg-slate-950/80 p-0.5">
           {TARGET_OPTIONS.map((opt) => {
-            const isSelected = target === opt.id
+            const isSelected = selectedChildId === opt.id
             return (
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => setTarget(opt.id)}
+                onClick={() => selectChild(opt.id)}
                 className={cn(
                   'flex-1 min-h-[40px] font-mono text-[10px] font-bold uppercase tracking-wider transition-all touch-manipulation',
                   isSelected
@@ -666,9 +425,9 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
             const isGameGroup = group.id === 'game'
             const isMediaGroup = group.id === 'media'
             const isSelected = isGameGroup
-              ? mode === 'game'
+              ? timerMode === 'game'
               : isMediaGroup
-                ? mode === 'youtube' || mode === 'good'
+                ? timerMode !== 'game'
                 : false
 
             return (
@@ -677,7 +436,7 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
                 type="button"
                 onClick={() => {
                   if (isGameGroup) setMode('game')
-                  else if (isMediaGroup) setMode('youtube')
+                  else if (isMediaGroup) setMode('cartoons')
                 }}
                 className={cn(
                   'relative flex-1 min-h-[44px] rounded-lg font-gaming text-[11px] font-bold uppercase transition-all touch-manipulation flex items-center justify-center gap-1.5 overflow-hidden',
@@ -706,20 +465,20 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
           })}
         </div>
 
-        {/* Sub-mode: Обычные / Полезные (when Media) */}
-        {(mode === 'youtube' || mode === 'good') && (
+        {/* Sub-mode: Обычные / Полезные (when Cartoons) */}
+        {timerMode === 'cartoons' && (
           <div className="flex gap-1.5">
             {[
-              { id: 'youtube', label: '📺 Обычные', Icon: Tv },
-              { id: 'good', label: '🍏 Полезные', Icon: Apple },
+              { id: 'youtube', label: '📺 Обычные' },
+              { id: 'good', label: '🍏 Полезные' },
             ].map((opt) => (
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => setMode(opt.id)}
+                onClick={() => setCartoonsFlavor(opt.id)}
                 className={cn(
                   'flex-1 min-h-[32px] px-2.5 rounded-lg border font-gaming text-[10px] font-bold uppercase transition touch-manipulation flex items-center justify-center gap-1.5',
-                  mode === opt.id
+                  activityType === opt.id
                     ? 'border-pink-400/70 bg-pink-500/20 text-pink-200 shadow-[inset_0_0_12px_rgba(236,72,153,0.15)]'
                     : 'border-white/10 text-slate-500 hover:bg-white/5 hover:text-slate-300'
                 )}
@@ -739,44 +498,72 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={startSelected}
-            disabled={!canStart || actionPending}
+            onClick={async () => {
+              if (!canStart) {
+                playError()
+                return
+              }
+              playEngineRev()
+              try {
+                await startTimer()
+              } catch (e) {
+                console.error('[TG_TIMER] start error', e)
+                setLastOfflineSyncToast({ message: 'Ошибка старта таймера. Проверьте консоль (F12).' })
+              }
+            }}
+            disabled={!canStart}
             className={cn(
               'flex-1 min-h-[44px] rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
               canStart
                 ? 'border-emerald-500/70 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
                 : 'btn-control-disabled border-slate-600/60 bg-slate-800/40 text-slate-500',
-              anyTargetPlaying &&
+              timerStatus === 'playing' &&
                 'shadow-[0_0_16px_rgba(34,197,94,0.4)] ring-1 ring-emerald-400/50',
-              actionPending && 'opacity-70 pointer-events-none'
             )}
           >
             ▶ СТАРТ
           </button>
           <button
             type="button"
-            onClick={pauseSelected}
-            disabled={!canPause || actionPending}
+            onClick={async () => {
+              try {
+                if (timerStatus === 'paused') await resumeTimer()
+                else await pauseTimer()
+              } catch (e) {
+                console.error('[TG_TIMER] pause error', e)
+                playError()
+                setLastOfflineSyncToast({ message: 'Ошибка паузы. Проверьте консоль (F12).' })
+              }
+            }}
+            disabled={!canPauseOrResume}
             className={cn(
               'flex-1 min-h-[44px] rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
-              canPause
+              canPauseOrResume
                 ? 'border-amber-500/70 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 shadow-[inset_0_0_12px_rgba(251,191,36,0.1)]'
                 : 'btn-control-disabled border-slate-600/60 bg-slate-800/40 text-slate-500',
-              actionPending && 'opacity-70 pointer-events-none'
             )}
           >
-            ⏸ ПАУЗА
+            {timerStatus === 'paused' ? '▶ ПРОДОЛЖИТЬ' : '⏸ ПАУЗА'}
           </button>
           <button
             type="button"
-            onClick={stopSelected}
-            disabled={!canStop || actionPending}
+            onClick={async () => {
+              if (!canStop) return
+              playCashRegister()
+              try {
+                await stopTimer()
+              } catch (e) {
+                console.error('[TG_TIMER] stop error', e)
+                playError()
+                setLastOfflineSyncToast({ message: 'Ошибка остановки. Проверьте консоль (F12).' })
+              }
+            }}
+            disabled={!canStop}
             className={cn(
               'flex-1 min-h-[44px] rounded-xl border-2 font-gaming text-[10px] font-bold uppercase transition touch-manipulation',
               canStop
                 ? 'border-red-500/80 bg-red-500/20 text-red-200 hover:bg-red-500/30 shadow-[inset_0_0_12px_rgba(239,68,68,0.15)]'
                 : 'btn-control-disabled border-slate-600/60 bg-slate-800/40 text-slate-500',
-              actionPending && 'opacity-70 pointer-events-none'
             )}
           >
             ■ СТОП
@@ -788,29 +575,47 @@ export function ControlCenter({ wheelPilot, setWheelPilot, setWheelOpen } = {}) 
 
       {/* Visual Burn Rate Timeline for each pilot */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-1.5">
-        <BurnTimeline pilotId="kirill" mode={mode} />
-        <BurnTimeline pilotId="roma" mode={mode} />
+        <BurnTimeline pilotId="kirill" mode={timerMode === 'game' ? 'game' : 'youtube'} />
+        <BurnTimeline pilotId="roma" mode={timerMode === 'game' ? 'game' : 'youtube'} />
       </div>
+
+      {import.meta.env.DEV && (
+        <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
+              [TG_TIMER] debug
+            </span>
+            {errorMessage ? (
+              <span className="font-mono text-[10px] uppercase tracking-widest text-red-300">
+                {errorMessage}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[10px] text-slate-300">
+            <div>status: {timerStatus}</div>
+            <div>target: {selectedChildId}</div>
+            <div>mode: {timerMode}</div>
+            <div>
+              remaining: {remainingSeconds}s / total: {totalSeconds}s
+            </div>
+            <div>burnedMin(roma): {lastBurnedMinuteByPilot.roma}</div>
+            <div>burnedMin(kirill): {lastBurnedMinuteByPilot.kirill}</div>
+          </div>
+        </div>
+      )}
 
       {/* Dual cockpit: two pilot cards - Kirill LEFT, Roma RIGHT */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 flex-1 min-h-0">
         <PilotEngine
           id="kirill"
-          elapsedSeconds={kirillElapsedSeconds}
-          mode={mode}
-          onStartRefs={onStartRefs}
-          onPause={onPause}
-          onResume={onResume}
-          onStop={onStop}
+          // Do not pass elapsedSeconds from active_timers; PilotEngine will fall back to store timerStartAt.
+          elapsedSeconds={undefined}
+          mode={timerMode === 'game' ? 'game' : 'youtube'}
         />
         <PilotEngine
           id="roma"
-          elapsedSeconds={romaElapsedSeconds}
-          mode={mode}
-          onStartRefs={onStartRefs}
-          onPause={onPause}
-          onResume={onResume}
-          onStop={onStop}
+          elapsedSeconds={undefined}
+          mode={timerMode === 'game' ? 'game' : 'youtube'}
         />
       </div>
 

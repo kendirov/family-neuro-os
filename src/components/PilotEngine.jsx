@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/useAppStore'
 import { playEngineRev, playCashRegister, playError } from '@/lib/sounds'
 import { PilotAvatar } from '@/components/HelmetAvatar'
 import { cn } from '@/lib/utils'
+import { tgText } from '@/i18n/tgMessages'
 
 function getDateKey() {
   return new Date().toISOString().slice(0, 10)
@@ -296,7 +297,7 @@ export function PilotEngine({ id, elapsedSeconds: propElapsedSeconds, mode: init
               'font-mono text-xs font-bold uppercase tracking-wider',
               timelineZone.isGreenZone ? 'text-green-400' : 'text-orange-400'
             )}>
-              COST: {timelineZone.cost === 0 ? '0' : `-${timelineZone.cost}`} XP/min
+              {tgText('admin', 'timer.costLabel')}: {tgText('admin', 'timer.xpPerMin', { value: timelineZone.cost === 0 ? 0 : `-${timelineZone.cost}` })}
             </span>
           </div>
         )}

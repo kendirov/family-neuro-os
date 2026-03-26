@@ -1,0 +1,353 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Critical enums (family membership role lives in family_members, not in users/auth).
+enum FamilyMemberRole {
+  ADMIN
+  KID
+  ADULT_USER
+}
+
+enum EconomyAssetType {
+  XP
+  COINS
+  TIME_TOKENS
+  INVENTORY_ITEM
+}
+
+enum EconomyTxType {
+  // XP: only earns (xp_total projection)
+  XP_EARN
+
+  // Coins: spendable balance projection (never below 0)
+  COINS_EARN
+  COINS_SPEND
+
+  // Time Tokens: minutes-like tokens computed via screen_time_daily + ledger
+  TIME_TOKENS_EARN
+  TIME_TOKENS_SPEND
+  TIME_TOKENS_EXPIRE
+}
+
+enum TaskTemplateTimeBlock {
+  MORNING
+  AFTERNOON
+  EVENING
+  ANYTIME
+}
+
+enum TaskTemplateCategory {
+  ROUTINE
+  FOOD
+  SCHOOL
+  BONUS
+}
+
+enum TaskInstanceStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum RewardKind {
+  XP
+  COINS
+  TIME_TOKENS
+  INVENTORY_ITEM
+}
+
+enum ScreenTimeActivityType {
+  GAME
+  MEDIA_YOUTUBE
+  MEDIA_GOOD
+}
+
+enum ScreenTimeSessionStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum EconomySourceEntity {
+  SYSTEM
+  TASK_INSTANCE
+  REWARD_CATALOG
+  SCREEN_TIME_SESSION
+}
+
+model Family {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timezone  String   @map("timezone") @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  members            FamilyMember[]
+  dailyUserStates    DailyUserState[]
+  screenTimeDaily    ScreenTimeDaily[]
+  screenTimeSessions ScreenTimeSession[]
+  taskTemplates      TaskTemplate[]
+  rewardCatalog      RewardCatalog[]
+  inventoryItems     InventoryItem[]
+  economyTransactions EconomyTransaction[]
+
+  @@map("families")
+}
+
+model User {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayName String?  @map("display_name") @db.VarChar(120)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  memberships      FamilyMember[]
+  dailyUserStates   DailyUserState[]
+  screenTimeDaily   ScreenTimeDaily[]
+
+  @@map("users")
+}
+
+model FamilyMember {
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId  String              @map("family_id") @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  role      FamilyMemberRole   @map("role")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  family        Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  walletBalance WalletBalance?
+
+  assignedTaskInstances TaskInstance[] @relation("TaskAssignee")
+  screenTimeSessions     ScreenTimeSession[] @relation("ScreenTimeChild")
+  economyTransactions    EconomyTransaction[] @relation("EconomySubject")
+
+  inventoryItems InventoryItem[]
+
+  @@unique([familyId, userId]) // family + user uniqueness
+  @@index([familyId])
+
+  @@map("family_members")
+}
+
+model WalletBalance {
+  id               String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyMemberId  String  @map("family_member_id") @db.Uuid
+  xpTotal         BigInt  @default(0) @db.BigInt @map("xp_total")
+  coinsBalance    BigInt  @default(0) @db.BigInt @map("coins_balance")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  familyMember FamilyMember @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([familyMemberId])
+  @@index([familyMemberId])
+
+  @@map("wallet_balances")
+}
+
+model DailyUserState {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  familyId  String   @map("family_id") @db.Uuid
+  localDate DateTime @map("local_date") @db.Date
+
+  xpTotal    BigInt @default(0) @db.BigInt @map("xp_total")
+  level      Int    @default(1)
+  coinsBalance BigInt @default(0) @db.BigInt @map("coins_balance")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, localDate]) // user + local_date uniqueness
+  @@index([familyId, localDate])
+
+  @@map("daily_user_state")
+}
+
+model ScreenTimeDaily {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  familyId  String   @map("family_id") @db.Uuid
+  localDate DateTime @map("local_date") @db.Date
+
+  hardCapMinutesPerDay Int    @map("hard_cap_minutes_per_day")
+
+  timeTokensSpentMinutes     BigInt @default(0) @db.BigInt @map("time_tokens_spent_minutes")
+  timeTokensRemainingMinutes BigInt @default(0) @db.BigInt @map("time_tokens_remaining_minutes")
+  timeTokensExpiredMinutes   BigInt @default(0) @db.BigInt @map("time_tokens_expired_minutes")
+
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, localDate]) // user + local_date uniqueness
+  @@index([familyId, localDate])
+
+  @@map("screen_time_daily")
+}
+
+model ScreenTimeSession {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId        String                @map("family_id") @db.Uuid
+  childMemberId  String                @map("child_member_id") @db.Uuid
+
+  activityType    ScreenTimeActivityType @map("activity_type")
+  status          ScreenTimeSessionStatus @default(ACTIVE) @map("status")
+
+  startedAt       DateTime             @default(now()) @map("started_at")
+  plannedEndAt    DateTime?           @map("planned_end_at")
+  accumulatedSeconds BigInt           @default(0) @db.BigInt @map("accumulated_seconds")
+  pausedAt        DateTime?            @map("paused_at")
+  totalPausedSeconds BigInt           @default(0) @db.BigInt @map("total_paused_seconds")
+  lastEventAt     DateTime?           @map("last_event_at")
+  completedAt     DateTime?            @map("completed_at")
+
+  meta            Json?                @db.JsonB
+
+  family       Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  childMember  FamilyMember  @relation("ScreenTimeChild", fields: [childMemberId], references: [id], onDelete: Cascade)
+
+  economyTransactions EconomyTransaction[] @relation("ScreenTimeSessionLink")
+
+  @@index([familyId, childMemberId, status])
+
+  @@map("screen_time_sessions")
+}
+
+model TaskTemplate {
+  id          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId    String                @map("family_id") @db.Uuid
+  code        String                @map("code") @db.VarChar(120)
+  label       String                @map("label") @db.VarChar(200)
+
+  timeBlock   TaskTemplateTimeBlock   @map("time_block")
+  category    TaskTemplateCategory    @map("category")
+  sortOrder   Int                   @default(0) @map("sort_order")
+
+  // Rewards payload (server-side validation later)
+  xpReward          BigInt @default(0) @db.BigInt @map("xp_reward")
+  coinsReward       BigInt @default(0) @db.BigInt @map("coins_reward")
+  timeTokensRewardMinutes Int @default(0) @map("time_tokens_reward_minutes")
+
+  meta Json? @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at")
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  instances TaskInstance[]
+
+  @@unique([familyId, code])
+  @@index([familyId, timeBlock, category])
+
+  @@map("task_templates")
+}
+
+model TaskInstance {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  templateId    String             @map("template_id") @db.Uuid
+  assigneeMemberId String          @map("assignee_member_id") @db.Uuid
+  localDate     DateTime          @map("local_date") @db.Date
+
+  status        TaskInstanceStatus @default(PENDING)
+  assignedAt    DateTime           @default(now()) @map("assigned_at")
+  completedAt   DateTime?          @map("completed_at")
+  meta           Json?             @db.JsonB
+
+  template TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  assignee FamilyMember @relation("TaskAssignee", fields: [assigneeMemberId], references: [id], onDelete: Cascade)
+
+  economyTransactions EconomyTransaction[] @relation("TaskInstanceLink")
+
+  @@unique([templateId, assigneeMemberId, localDate]) // template + assignee + local_date uniqueness
+  @@index([assigneeMemberId, localDate])
+  @@index([templateId])
+
+  @@map("task_instances")
+}
+
+model RewardCatalog {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId    String     @map("family_id") @db.Uuid
+  rewardCode  String     @map("reward_code") @db.VarChar(120)
+
+  kind        RewardKind @map("kind")
+
+  assetType   EconomyAssetType? @map("asset_type")
+  amount      BigInt?           @db.BigInt
+  inventoryItemSku String?      @map("inventory_item_sku")
+
+  meta Json? @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at")
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  economyTransactions EconomyTransaction[] @relation("RewardCatalogLink")
+
+  @@unique([familyId, rewardCode])
+  @@index([familyId, kind])
+
+  @@map("reward_catalog")
+}
+
+model InventoryItem {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId      String    @map("family_id") @db.Uuid
+  ownerMemberId String   @map("owner_member_id") @db.Uuid
+
+  itemSku       String    @map("item_sku") @db.VarChar(160)
+  quantity      BigInt    @default(0) @db.BigInt
+  meta          Json?     @db.JsonB
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  owner  FamilyMember @relation(fields: [ownerMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerMemberId, itemSku])
+  @@index([familyId, itemSku])
+
+  @@map("inventory_items")
+}
+
+model EconomyTransaction {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId  String   @map("family_id") @db.Uuid
+
+  subjectMemberId String @map("subject_member_id") @db.Uuid
+
+  assetType EconomyAssetType @map("asset_type")
+  txType    EconomyTxType    @map("tx_type")
+  amount    BigInt          @map("amount") @db.BigInt
+
+  // Nullable + unique: multiple nulls are allowed in Postgres.
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(160) @unique
+
+  localDate DateTime? @map("local_date") @db.Date
+
+  sourceEntity EconomySourceEntity @map("source_entity")
+  sourceId     String? @map("source_id") // polymorphic UUID stored as text (keeps schema flexible)
+
+  taskInstanceId       String? @map("task_instance_id") @db.Uuid
+  rewardCatalogId      String? @map("reward_catalog_id") @db.Uuid
+  screenTimeSessionId  String? @map("screen_time_session_id") @db.Uuid
+
+  meta Json? @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at")
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  subjectMember FamilyMember @relation("EconomySubject", fields: [subjectMemberId], references: [id], onDelete: Cascade)
+
+  taskInstance TaskInstance? @relation("TaskInstanceLink", fields: [taskInstanceId], references: [id], onDelete: SetNull)
+  rewardCatalog RewardCatalog? @relation("RewardCatalogLink", fields: [rewardCatalogId], references: [id], onDelete: SetNull)
+  screenTimeSession ScreenTimeSession? @relation("ScreenTimeSessionLink", fields: [screenTimeSessionId], references: [id], onDelete: SetNull)
+
+  @@index([familyId, subjectMemberId, createdAt])
+  @@index([familyId, assetType, localDate])
+
+  @@map("economy_transactions")
+}
+

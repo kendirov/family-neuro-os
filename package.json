@@ -7,14 +7,23 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "backend:seed": "node backend/seed/runSeed.js",
+    "backend:assertions": "node backend/tests/runAssertions.js",
+    "backend:scheduler": "node backend/runScheduler.js",
     "preview": "vite preview"
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "^5.2.7",
+    "@prisma/client": "^7.5.0",
     "@supabase/supabase-js": "^2.95.3",
     "canvas-confetti": "^1.9.4",
     "framer-motion": "^12.33.0",
     "lucide-react": "^0.563.0",
+    "motion": "^12.38.0",
+    "node-cron": "^4.2.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",
@@ -32,6 +41,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "postcss": "^8.5.6",
+    "prisma": "^7.5.0",
     "tailwindcss": "^3.4.19",
     "vite": "^7.2.4"
   }
